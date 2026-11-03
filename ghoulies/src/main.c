@@ -601,6 +601,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
          * shaders go into the disk cache (minutes on a first start), and
          * Windows' first-run scan of a never-seen program happens now. */
         extern int nv2a_gpu_prewarm_shaders(void);
+        /* engine.ini first: its shader settings are part of each cache key.
+         * Prewarmed without them, every shader missed the cache and the
+         * installed game sat on "compiling ps_main" for minutes (3 Nov). */
+        load_settings();
         nv2a_gpu_prewarm_shaders();
         return 0;
     }
