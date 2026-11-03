@@ -231,8 +231,18 @@ static int check_game(const WCHAR *path, WCHAR *title, int tn)
     int r;
     if (title && tn) title[0] = 0;
     if (a == INVALID_FILE_ATTRIBUTES) return GAME_BAD;
-    if (a & FILE_ATTRIBUTE_DIRECTORY) wsprintfW(p, L"%s\\default.xbe", path);
-    else lstrcpynW(p, path, MAX_PATH);
+    if (a & FILE_ATTRIBUTE_DIRECTORY) {
+        /* The whole disc, not just its program: a folder with only a
+         * default.xbe in it (an emulator's extract) passed the ID check and
+         * was offered as "your game" (3 Nov). The data is in bundles\. */
+        DWORD ba;
+        wsprintfW(p, L"%s\\bundles", path);
+        ba = GetFileAttributesW(p);
+        if (ba == INVALID_FILE_ATTRIBUTES || !(ba & FILE_ATTRIBUTE_DIRECTORY))
+            return GAME_BAD;
+        wsprintfW(p, L"%s\\default.xbe", path);
+    } else
+        lstrcpynW(p, path, MAX_PATH);
     h = CreateFileW(p, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
     if (h == INVALID_HANDLE_VALUE) return GAME_BAD;
     r = (a & FILE_ATTRIBUTE_DIRECTORY) ? check_xbe(h, 0, title, tn) : check_iso(h, title, tn);
