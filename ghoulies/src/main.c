@@ -582,6 +582,92 @@ static void load_settings(void)
     load_ini(path, 0);
 }
 
+/* Where saves and caches live: a "Data" folder next to the .exe (from the
+ * Orta port), or %LOCALAPPDATA%\Ghoulies PC if the game folder can't be
+ * written to. The toolkit's default, %LOCALAPPDATA%\xboxrecomp, is hidden
+ * and shared with every other build -- the dev build held a cache file open
+ * there and the installed game said the disc was dirty (3 Nov).
+ *   Data\TitleData, Data\UserData, Data\SystemData   saves
+ *   Data\Cache                                        the game's cache drive
+ * Deleting Data\Cache gives the cache a fresh start; deleting Data, a fresh
+ * install. */
+static char g_data_dir[MAX_PATH];
+static int g_data_copied;
+
+static int dir_writable(const char *dir)
+{
+    char probe[MAX_PATH];
+    HANDLE h;
+    CreateDirectoryA(dir, NULL);
+    snprintf(probe, sizeof probe, "%s\\.write_test", dir);
+    h = CreateFileA(probe, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
+                    FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE, NULL);
+    if (h == INVALID_HANDLE_VALUE)
+        return 0;
+    CloseHandle(h);
+    return 1;
+}
+
+/* Copy a folder tree, never overwriting: used once, to bring saves over. */
+static int copy_tree(const char *from, const char *to)
+{
+    char pat[MAX_PATH], a[MAX_PATH], b[MAX_PATH];
+    WIN32_FIND_DATAA fd;
+    HANDLE h;
+    int n = 0;
+    CreateDirectoryA(to, NULL);
+    snprintf(pat, sizeof pat, "%s\\*", from);
+    h = FindFirstFileA(pat, &fd);
+    if (h == INVALID_HANDLE_VALUE)
+        return 0;
+    do {
+        if (!strcmp(fd.cFileName, ".") || !strcmp(fd.cFileName, ".."))
+            continue;
+        snprintf(a, sizeof a, "%s\\%s", from, fd.cFileName);
+        snprintf(b, sizeof b, "%s\\%s", to, fd.cFileName);
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+            n += copy_tree(a, b);
+        else if (CopyFileA(a, b, TRUE))
+            n++;
+    } while (FindNextFileA(h, &fd));
+    FindClose(h);
+    return n;
+}
+
+static void setup_data_dir(void)
+{
+    char exe_dir[MAX_PATH], *slash, sub[MAX_PATH], old[MAX_PATH], local[MAX_PATH];
+    DWORD n = GetModuleFileNameA(NULL, exe_dir, MAX_PATH);
+    DWORD ln = GetEnvironmentVariableA("LOCALAPPDATA", local, sizeof local);
+    if (!n || n >= MAX_PATH)
+        return;
+    slash = strrchr(exe_dir, '\\');
+    if (slash)
+        slash[0] = 0;
+    snprintf(g_data_dir, sizeof g_data_dir, "%s\\Data", exe_dir);
+    if (!dir_writable(g_data_dir)) {
+        if (!ln || ln >= sizeof local - 16) {
+            g_data_dir[0] = 0;          /* leave it to the toolkit default */
+            return;
+        }
+        snprintf(g_data_dir, sizeof g_data_dir, "%s\\Ghoulies PC", local);
+        CreateDirectoryA(g_data_dir, NULL);
+    }
+    /* First start: bring saves over from the old shared location (left as
+     * it is). The cache is not copied -- it is only a cache. */
+    snprintf(sub, sizeof sub, "%s\\UserData", g_data_dir);
+    if (GetFileAttributesA(sub) == INVALID_FILE_ATTRIBUTES && ln && ln < sizeof local - 16) {
+        static const char *keep[] = { "TitleData", "UserData", "SystemData" };
+        int i;
+        for (i = 0; i < 3; i++) {
+            snprintf(old, sizeof old, "%s\\xboxrecomp\\%s", local, keep[i]);
+            snprintf(sub, sizeof sub, "%s\\%s", g_data_dir, keep[i]);
+            if (GetFileAttributesA(old) != INVALID_FILE_ATTRIBUTES)
+                g_data_copied += copy_tree(old, sub);
+        }
+    }
+}
+
 #include "overlay.h"
 
 /* ── WinMain ───────────────────────────────────────────────── */
@@ -610,6 +696,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     }
 
     load_settings();
+    setup_data_dir();
     ovl_install();                 /* F1 settings menu */
     find_game_dir();
 
@@ -695,7 +782,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     /* Step 4: Set game directory for file I/O path translation */
     {
         extern void xbox_path_init(const char *game_dir, const char *save_dir);
-        xbox_path_init(g_game_dir, NULL);
+        xbox_path_init(g_game_dir, g_data_dir[0] ? g_data_dir : NULL);
+        fprintf(stderr, "[DATA] saves and caches in %s%s\n",
+                g_data_dir[0] ? g_data_dir : "(toolkit default)",
+                g_data_copied ? " (saves copied over from the old location)" : "");
     }
 
     /* Step 5: Initialize kernel bridge (thunk table in Xbox memory) */

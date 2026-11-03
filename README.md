@@ -44,8 +44,8 @@ Download `GhouliesPC_Setup.exe` from the Releases page and run it.
 - **Anti-aliasing:** Off, Smooth scaling, or Smooth scaling + FXAA (`AntiAliasing = 0/1/2` in `[Display]`).
 - **60 fps:** the game keeps real-time speed at any frame rate (`FrameRateCap = 60`, or 0 for no cap).
 - **Alt+Enter** switches fullscreen. **F11** saves a frame capture for bug reports.
-- **Shaders:** compiled graphics shaders are kept in `shadercache` next to the game. Deleting the folder is safe; the next start rebuilds it.
-- **Saves:** stored in `game_files\UDATA`.
+- **Data folder** next to the game: saves (`Data\UserData`, `Data\TitleData`) and the game's cache (`Data\Cache`). If the game folder can't be written to, it goes in `%LOCALAPPDATA%\Ghoulies PC` instead. Deleting `Data\Cache` is safe.
+- **Shaders:** compiled graphics shaders are kept in `shadercache` next to the game. Setup prepares them, so the first start is quick. Deleting the folder is safe; the next start rebuilds it.
 - **Problem reports:** each run writes `session_log.txt` next to the game, and keeps the previous run's log as `session_log_previous.txt`. Send these with any report.
 
 To make the installer yourself, `installer/build_setup.sh` builds the `Setup.exe` stub (clang and lld-link, no C runtime). Then `python installer/make_release.py GhouliesPC_Setup.exe` appends the sources to it.
