@@ -352,6 +352,53 @@ static bool decode_and_handle(PCONTEXT ctx, uint32_t mmio_offset, int is_write)
         return true;
     }
 
+    /* Group 1/3 with an immediate: TEST (F6/F7 /0), and CMP, OR, AND
+     * (80/81/83 /7, /1, /4). The installer builds with clang, which folds a
+     * register read into these where MSVC emitted a plain load: the APU
+     * register at +0x2000 was read with `test dword [...], imm32` and the
+     * installed game crashed at start-up (3 Nov). */
+    if (opcode[0] == 0xF6 || opcode[0] == 0xF7 || opcode[0] == 0x80
+        || opcode[0] == 0x81 || opcode[0] == 0x83) {
+        int op = (opcode[1] >> 3) & 7;
+        int test = opcode[0] == 0xF6 || opcode[0] == 0xF7;
+        int byteop = opcode[0] == 0xF6 || opcode[0] == 0x80;
+        int modrm_len = decode_modrm_len(opcode + 1, rex_b);
+        int imm_len;
+        uint64_t imm, mem_val, res, mask, sb;
+        uint32_t f;
+        uint8_t lo;
+        int par = 1;
+        if ((test && op != 0) || (!test && op != 7 && op != 1 && op != 4))
+            goto unrecognised;
+        if (byteop) access_size = 1;
+        imm_len = (opcode[0] == 0x83 || byteop) ? 1 : (access_size == 2 ? 2 : 4);
+        if (imm_len == 1) imm = (uint64_t)(int64_t)*(const int8_t *)(opcode + 1 + modrm_len);
+        else if (imm_len == 2) imm = (uint64_t)(int64_t)*(const int16_t *)(opcode + 1 + modrm_len);
+        else imm = (uint64_t)(int64_t)*(const int32_t *)(opcode + 1 + modrm_len);
+        mask = access_size == 8 ? ~0ULL : ((1ULL << (access_size * 8)) - 1);
+        imm &= mask;
+        mem_val = nv2a_mmio_read(nv2a, mmio_offset, access_size) & mask;
+        if (test || op == 4) res = mem_val & imm;
+        else if (op == 1) res = mem_val | imm;
+        else res = (mem_val - imm) & mask;
+        if (!test && op != 7)
+            nv2a_mmio_write(nv2a, mmio_offset, res, access_size);
+        sb = 1ULL << (access_size * 8 - 1);
+        f = (uint32_t)ctx->EFlags & ~(0x1u | 0x4u | 0x40u | 0x80u | 0x800u);
+        for (lo = (uint8_t)res; lo; lo >>= 1)
+            par ^= lo & 1;
+        if (!res) f |= 0x40u;
+        if (res & sb) f |= 0x80u;
+        if (par) f |= 0x4u;
+        if (!test && op == 7) {
+            if (mem_val < imm) f |= 0x1u;
+            if (((mem_val ^ imm) & (mem_val ^ res)) & sb) f |= 0x800u;
+        }
+        ctx->EFlags = f;
+        ctx->Rip += prefix_len + 1 + modrm_len + imm_len;
+        return true;
+    }
+unrecognised:
     /* Unrecognized instruction */
     g_mmio_decode_fail++;
     if (g_mmio_decode_fail <= 20) {
