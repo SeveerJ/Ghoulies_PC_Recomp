@@ -1,0 +1,55 @@
+# --- Game files: never commit (bring your own disc) ---
+*.xbe
+*.iso
+*.xiso
+game_files/
+UDATA/
+
+# --- Generated from the game: recompiled code and disassembly ---
+ghoulies/src/recomp/gen/
+**/tools/*/output/
+*.orig
+__pycache__/
+*.pyc
+xdvdfs.exe
+ghoulies/src/ghoulies.ico
+
+# --- Build output ---
+build/
+build64/
+out/
+*.exe
+*.pdb
+*.obj
+*.lib
+*.ilk
+*.exp
+
+# --- Run-time logs, captures and dumps ---
+stderr.txt
+stdout.txt
+loop_output.txt
+watch_status.txt
+package_report.txt
+xbox_kernel.log
+pxset.txt
+capture*.txt
+apu_out.raw
+frame.bmp*
+hires*.bmp
+texdump/
+*.flag
+last_translation.stamp
+
+# --- Editors / OS ---
+.vs/
+.vscode/
+*.user
+Thumbs.db
+.DS_Store
+_obj/
+session_log*.txt
+setup_log.txt
+play_log.txt
+bink_dump*
+memdump*

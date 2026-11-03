@@ -1,0 +1,12 @@
+# Changelog
+
+## First playtest build
+
+- Recompiled Grabbed by the Ghoulies (US) runs on PC, with the Orta PC toolkit changes.
+- Real-time frame timing, so the game runs at the right speed at 60 fps.
+- Flips are presented straight away instead of waiting for the next vblank, which helps hold 60 fps.
+- Anti-aliasing: smooth scaling and FXAA (F1 menu and settings.ini).
+- Fixed: black screen after a zombie kill (the depth-replace texture mode is now emulated).
+- Fixed: crash when a challenge is failed and the Reaper appears.
+- Fixed: blocky Bink videos on loading screens and in cutscenes (a 16-bit `movsx` from `bp`/`sp` was translated wrongly).
+- Setup.exe builds the game from your own disc on your own PC.
