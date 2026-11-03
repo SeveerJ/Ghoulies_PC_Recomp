@@ -11,6 +11,7 @@
  *   - Thread priorities use NT KPRIORITY increments
  */
 
+#include <stdlib.h>
 #include "kernel.h"
 #include "xbox_memory_layout.h"   /* XBOX_WORKER_STACK_* + worker-stack decls */
 
@@ -430,6 +431,26 @@ int xbox_worker_stack_alloc(void)
             return i;
     }
     return -1;  /* all slices in use */
+}
+
+uint32_t xbox_worker_stack_top(int n)
+{
+    static uint32_t top[XBOX_WORKER_STACK_COUNT];
+    static int low = -1;
+    if (low < 0) {
+        const char *e = getenv("RECOMP_WORKER_STACK_LOW");
+        low = e && *e == '1';
+    }
+    if (n < 0 || n >= XBOX_WORKER_STACK_COUNT)
+        return 0;
+    /* Only the holder of slot n gets here for it, so no race on top[n]. */
+    if (!top[n] && !low) {
+        uint32_t base = xbox_HeapAlloc(XBOX_WORKER_STACK_SIZE, 4096);
+        if (base)
+            top[n] = base + XBOX_WORKER_STACK_SIZE - 16;
+    }
+    return top[n] ? top[n]
+                  : XBOX_WORKER_STACK_BASE + XBOX_WORKER_STACK_SIZE * (uint32_t)(n + 1) - 16;
 }
 
 void xbox_worker_stack_free(int slot)

@@ -396,9 +396,16 @@ extern RECOMP_TLS uint32_t g_fs_base;
 #define XBOX_WORKER_STACK_END    (XBOX_WORKER_STACK_BASE + \
                                   XBOX_WORKER_STACK_SIZE * XBOX_WORKER_STACK_COUNT)
 
-/** Top (initial esp) of worker stack slice n, 16-byte aligned, growing down. */
-#define XBOX_WORKER_STACK_TOP(n) (XBOX_WORKER_STACK_BASE + \
-                                  XBOX_WORKER_STACK_SIZE * ((n) + 1) - 16)
+/** Top (initial esp) of worker stack slice n, 16-byte aligned, growing down.
+ *
+ * Slices now come from the heap (xbox_worker_stack_top, kernel_thread.c).
+ * At 0x00780000..0x00800000 they sat right under the main thread's 512 KB
+ * stack, and Grabbed by the Ghoulies' game thread goes a little past 512 KB:
+ * its frames and the APU interrupt's met at 0x007FFFxx and the game crashed,
+ * in DirectSound's interrupt or in its own code (3 Nov). The main thread
+ * keeps the whole 1 MB region now. RECOMP_WORKER_STACK_LOW=1: the old slices. */
+uint32_t xbox_worker_stack_top(int n);
+#define XBOX_WORKER_STACK_TOP(n) xbox_worker_stack_top(n)
 
 /* ================================================================
  * Xbox dynamic heap (for MmAllocateContiguousMemory, etc.)

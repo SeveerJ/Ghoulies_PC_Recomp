@@ -1042,6 +1042,55 @@ void recomp_unimpl(const char *text, uint32_t va)
 }
 
 
+/* Kick watchdog (with RECOMP_SYNC_KICK_LAG > 0). Letting the game run ahead
+ * of the GPU once hung a room load: D3D queued fences without kicking them
+ * and then waited on them, with the reader idle at PUT. If the reader sits
+ * idle at PUT for RECOMP_KICK_WATCHDOG_MS (default 30) while D3D has
+ * written commands past it, this publishes them -- what the next kick would
+ * have done. Compare-and-swap, so a kick the game makes meanwhile wins and
+ * PUT never moves backwards. RECOMP_KICK_WATCHDOG=0 turns it off. */
+long _InterlockedCompareExchange(long volatile *, long, long);   /* an intrinsic on x64 */
+#pragma intrinsic(_InterlockedCompareExchange)
+static volatile uint32_t s_kick_dev;
+static unsigned long __stdcall kick_watchdog(void *arg)
+{
+    const char *e = getenv("RECOMP_KICK_WATCHDOG_MS");
+    unsigned long limit = e ? (unsigned long)atol(e) : 30ul, idle = 0;
+    unsigned kicks = 0;
+    (void)arg;
+    if (limit < 5) limit = 5;
+    for (;;) {
+        uint32_t dev, user, put, get, push, want;
+        Sleep(5);
+        dev = s_kick_dev;
+        if (!dev || (GMEM32(dev + 8) & 0x2000u) || GMEM32(0x00181960u))
+            continue;
+        user = GMEM32(dev + 0x1C10);
+        if (!user)
+            continue;
+        put = GMEM32(user + 0x40);
+        get = GMEM32(user + 0x44);
+        push = (GMEM32(dev + 8) & 4u) ? GMEM32(dev + 0x76C) : GMEM32(dev);
+        want = push & 0x0FFFFFFFu;
+        if ((get & 0x0FFFFFFFu) != (put & 0x0FFFFFFFu) || want == (put & 0x0FFFFFFFu) || !want) {
+            idle = 0;
+            continue;
+        }
+        idle += 5;
+        if (idle < limit)
+            continue;
+        idle = 0;
+        if ((uint32_t)_InterlockedCompareExchange((volatile long *)&GMEM32(user + 0x40),
+                                                 (long)want, (long)put) == put
+            && kicks++ < 20) {
+            fprintf(stderr, "[KICK] watchdog: reader idle at %08X with commands to %08X"
+                            " -- kicked them\n", put, want);
+            fflush(stderr);
+        }
+    }
+    return 0;
+}
+
 /* ── D3D KickOff, synchronous (0x177280) ──────────────────────────────────
  *
  * thiscall(device), no arguments, plain ret. The original flushes the
@@ -1071,6 +1120,7 @@ void sub_00177280(void)
     uint32_t dev = g_ecx;
     uint32_t flags = GMEM32(dev + 8);
     uint32_t push = (flags & 4u) ? GMEM32(dev + 0x76C) : GMEM32(dev);
+    s_kick_dev = dev;
 
     if (sync < 0) {
         const char *e = getenv("RECOMP_SYNC_KICK");
@@ -1081,6 +1131,11 @@ void sub_00177280(void)
         max_lag = l ? (uint32_t)strtoul(l, NULL, 0) : 0u;
         fprintf(stderr, "[KICK] synchronous kick-off %s, reader may trail by %u bytes\n",
                 sync ? "on" : "off", max_lag);
+        if (sync && max_lag) {
+            const char *w = getenv("RECOMP_KICK_WATCHDOG");
+            if (!(w && *w == '0'))
+                CreateThread(NULL, 0, kick_watchdog, NULL, 0, NULL);
+        }
     }
 
     if (flags & 0x2000u) {

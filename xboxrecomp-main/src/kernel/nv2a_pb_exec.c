@@ -282,6 +282,7 @@ typedef struct {
     uint32_t palette;                   /* guest address of the CLUT, P8 */
     uint32_t levels;                    /* mip levels, from FORMAT       */
     uint32_t filter;                    /* SET_TEXTURE_FILTER            */
+    uint32_t border;                    /* SET_TEXTURE_BORDER_COLOR      */
     int      cube;                      /* FORMAT: six faces, not one    */
     int      valid;
 } Texture;
@@ -348,6 +349,7 @@ static struct {
     uint32_t clip_plane_mode;           /* SET_SHADER_CLIP_PLANE_MODE */
     float    bump[4][6];                /* SET_TEXTURE_SET_BUMP_ENV_MAT/SCALE/OFFSET */
     uint32_t other_stage_input;         /* SET_SHADER_OTHER_STAGE_INPUT */
+    uint32_t dot_rgbmapping;            /* SET_DOT_RGBMAPPING */
     uint32_t control0;                  /* SET_CONTROL0 (bit 12: float depth) */
     uint32_t zclip_min, zclip_max;      /* SET_CLIP_MIN/MAX, float bits */
     uint32_t zminmax, zclip_set;        /* SET_ZMIN_MAX_CONTROL; clip range given */
@@ -2078,6 +2080,7 @@ static void tex_from_desc(Texture *t, const Nv2aGpuTexDesc *d)
     t->pitch = d->pitch; t->color = d->color;
     t->addr_u = d->addr_u; t->addr_v = d->addr_v;
     t->palette = d->palette; t->levels = d->levels; t->filter = d->filter;
+    t->border = d->border;
     t->cube = d->cube; t->valid = d->valid;
 }
 
@@ -2088,6 +2091,7 @@ static void desc_from_tex(Nv2aGpuTexDesc *d, const Texture *t)
     d->pitch = t->pitch; d->color = t->color;
     d->addr_u = t->addr_u; d->addr_v = t->addr_v;
     d->palette = t->palette; d->levels = t->levels; d->filter = t->filter;
+    d->border = t->border;
     d->cube = t->cube; d->valid = t->valid;
 }
 
@@ -2631,6 +2635,7 @@ static void gpu_state(Nv2aGpuState *st, uint32_t mode)
         st->clip_plane_mode = s_gpu.clip_plane_mode;
         memcpy(st->bump, s_gpu.bump, sizeof st->bump);
         st->other_stage_input = s_gpu.other_stage_input;
+        st->dot_rgbmapping = s_gpu.dot_rgbmapping;
         st->fog_enable = s_gpu.fog_enable;
         st->fog_mode = s_gpu.fog_mode;
         st->fog_param[0] = s_gpu.fog_param[0];
@@ -4615,7 +4620,7 @@ static void tex_stage_method(uint32_t method, uint32_t param)
         break;
     case NV097_SET_TEXTURE_ADDRESS:
         /* Three bits per axis: 1 wrap, 2 mirror, 3 clamp-to-edge, 4 border
-         * (read as clamp), 5 clamp. Bit 4 is cylindrical wrap, not a mode. */
+         * (the border colour, 0x1B24), 5 clamp. Bit 4 is cylindrical wrap, not a mode. */
         t->addr_u =  param        & 0x7;
         t->addr_v = (param >>  8) & 0x7;
         {
@@ -4640,6 +4645,9 @@ static void tex_stage_method(uint32_t method, uint32_t param)
         break;
     case 0x1B14:                                  /* SET_TEXTURE_FILTER */
         t->filter = param;
+        break;
+    case 0x1B24:                                  /* SET_TEXTURE_BORDER_COLOR */
+        t->border = param;
         break;
     /* BUMP_ENV_MAT is 0x1B28-0x1B34 (after BORDER_COLOR at 0x1B24), then
      * SCALE 0x1B38 and OFFSET 0x1B3C. Read from 0x1B38 first, the matrix
@@ -5084,6 +5092,7 @@ void nv2a_pb_exec_method(uint32_t subch, uint32_t method, uint32_t param)
         break;
     case 0x17F8: s_gpu.clip_plane_mode = param; break;
     case 0x1E78: s_gpu.other_stage_input = param; break;
+    case 0x1E74: s_gpu.dot_rgbmapping = param; break;   /* SET_DOT_RGBMAPPING */
     case 0x0290: s_gpu.control0 = param; break;    /* SET_CONTROL0 */
     case 0x0394: s_gpu.zclip_min = param; s_gpu.zclip_set |= 1; break;   /* SET_CLIP_MIN */
     case 0x0398: s_gpu.zclip_max = param; s_gpu.zclip_set |= 2; break;   /* SET_CLIP_MAX */

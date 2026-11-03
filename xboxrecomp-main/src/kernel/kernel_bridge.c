@@ -1806,8 +1806,78 @@ static int bridge_drain_user_apcs(void);
 /* Alertable wait with queued APCs: run them and report STATUS_USER_APC. */
 #define ALERTABLE_APC_RETURN(al) do { if ((al) && bridge_drain_user_apcs()) { g_eax = 0xC0u; return; } } while (0)
 
-/* ── KeWaitForSingleObject (ordinal 159) ─────────────────── */
+/* Missed-wake guard (with RECOMP_SYNC_KICK_LAG > 0). With the game running
+ * ahead of the GPU, D3D can patch its "wake me" NOP behind a reader that has
+ * already passed that point; the event is then never set and the game sleeps
+ * on its busy event for ever, with every command executed (Grabbed by the
+ * Ghoulies, the shower, 3 Nov: GET == PUT, main thread in KeWait). If a
+ * thread waits on that event while the reader has been idle at PUT, with
+ * nothing unkicked, for RECOMP_KICK_WATCHDOG_MS (30), the event is set: all
+ * commands have run, so whatever D3D waits for has happened.
+ * RECOMP_KICK_WATCHDOG=0 turns it off. */
+static void bridge_KeWaitForSingleObject_body(void);
+static uint32_t s_gw_devp, s_gw_evoff;
+static volatile LONG s_gw_n;
+static DWORD WINAPI gpuwait_guard(LPVOID arg)
+{
+    const char *e = getenv("RECOMP_KICK_WATCHDOG_MS");
+    unsigned long limit = e ? (unsigned long)atol(e) : 30ul, idle = 0;
+    unsigned wakes = 0;
+    (void)arg;
+    if (limit < 5) limit = 5;
+    for (;;) {
+        uint32_t dev, user, put, get, push;
+        Sleep(5);
+        if (s_gw_n <= 0) { idle = 0; continue; }
+        dev = BRIDGE_MEM32(s_gw_devp);
+        if (!dev || dev >= 0x04000000u) { idle = 0; continue; }
+        user = BRIDGE_MEM32(dev + 0x1C10);
+        if (!user) { idle = 0; continue; }
+        put = BRIDGE_MEM32(user + 0x40) & 0x0FFFFFFFu;
+        get = BRIDGE_MEM32(user + 0x44) & 0x0FFFFFFFu;
+        push = ((BRIDGE_MEM32(dev + 8) & 4u) ? BRIDGE_MEM32(dev + 0x76C)
+                                             : BRIDGE_MEM32(dev)) & 0x0FFFFFFFu;
+        if (get != put || push != put) { idle = 0; continue; }
+        idle += 5;
+        if (idle < limit)
+            continue;
+        idle = 0;
+        xbox_GuestKeSetEvent(dev + s_gw_evoff);
+        if (wakes++ < 20) {
+            fprintf(stderr, "[KICK] wake guard: GPU idle at %08X with D3D asleep on its"
+                            " busy event -- set it\n", put);
+            fflush(stderr);
+        }
+    }
+    return 0;
+}
 static void bridge_KeWaitForSingleObject(void)
+{
+    static int on = -1;
+    uint32_t object = STACK_ARG(0), dev;
+    int watch = 0;
+    if (on < 0) {
+        const char *l = getenv("RECOMP_SYNC_KICK_LAG");
+        const char *w = getenv("RECOMP_KICK_WATCHDOG");
+        const char *d = getenv("RECOMP_SEMA_DEVPTR");
+        const char *o = getenv("RECOMP_GPU_INTR_EVENT");
+        s_gw_devp = d ? (uint32_t)strtoul(d, NULL, 0) : 0;
+        s_gw_evoff = o ? (uint32_t)strtoul(o, NULL, 0) : 0x2564u;
+        on = l && strtoul(l, NULL, 0) && !(w && *w == '0') && s_gw_devp;
+        if (on)
+            CloseHandle(CreateThread(NULL, 0, gpuwait_guard, NULL, 0, NULL));
+    }
+    if (on) {
+        dev = BRIDGE_MEM32(s_gw_devp);
+        watch = dev && object == dev + s_gw_evoff;
+    }
+    if (watch) InterlockedIncrement(&s_gw_n);
+    bridge_KeWaitForSingleObject_body();
+    if (watch) InterlockedDecrement(&s_gw_n);
+}
+
+/* ── KeWaitForSingleObject (ordinal 159) ─────────────────── */
+static void bridge_KeWaitForSingleObject_body(void)
 {
     uint32_t object = STACK_ARG(0);
     uint32_t wait_reason = STACK_ARG(1);

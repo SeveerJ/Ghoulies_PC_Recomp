@@ -32,6 +32,7 @@ typedef struct {
     uint32_t palette;
     uint32_t levels;
     uint32_t filter;
+    uint32_t border;          /* BORDER_COLOR, ARGB8888 (address mode 4) */
     int      cube;
     int      valid;
 } Nv2aGpuTexDesc;
@@ -74,6 +75,7 @@ typedef struct {
      * m00 m01 m10 m11, then luminance scale and offset (RC mode only). */
     float    bump[4][6];
     uint32_t other_stage_input; /* SET_SHADER_OTHER_STAGE_INPUT: source stage of 2, 3 */
+    uint32_t dot_rgbmapping;    /* SET_DOT_RGBMAPPING: how dot stages read their source */
     uint32_t z_float;           /* SET_CONTROL0 Z_FORMAT: the depth buffer holds floats */
     float    vpy[2];            /* c58.y, c59.y: the vertex program viewport's y scale/offset */
     float    zclip[2];          /* SET_CLIP_MIN/MAX: the depth range, in the title's z units */

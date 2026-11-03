@@ -119,6 +119,8 @@ static const char s_hlsl[] =
 "  float4 g_bumpl[4];\n"  /* x lum scale, y lum offset, z source stage */
 "  float4 g_zc;\n"       /* x,y the depth range in D3D depth units, z 1 = drop pixels outside it */
 "  float4 g_zo;\n"       /* polygon offset: x bias in D3D depth units, y slope factor per host pixel */
+"  float4 g_tbord[4];\n"  /* border colour per stage (address mode 4) */
+"  uint4 g_dmap;\n"       /* x SET_DOT_RGBMAPPING: 3 bits per stage from stage 1 */
 "};\n"
 "#ifndef SPEC\n"
 "#define RCX g_rc.x\n"
@@ -172,11 +174,14 @@ static const char s_hlsl[] =
 "  if (n <= 0) return 0;\n"
 "  if (mode == 1) return ((c % n) + n) % n;\n"
 "  if (mode == 2) { int p = ((c % (2 * n)) + 2 * n) % (2 * n); return p < n ? p : 2 * n - 1 - p; }\n"
+"  if (mode == 4 && (c < 0 || c >= n)) return -1;\n"
 "  return clamp(c, 0, n - 1);\n"
 "}\n"
 "float4 texel(uint s, int x, int y, uint f, uint m) {\n"
 "  int w = max((int)g_tsize[s].x >> m, 1), h = max((int)g_tsize[s].y >> m, 1);\n"
-"  float4 r = ld(s, wrapc(x, w, g_tex[s].y), wrapc(y, h, g_tex[s].z), f, m);\n"
+"  int cx = wrapc(x, w, g_tex[s].y), cy = wrapc(y, h, g_tex[s].z);\n"
+"  if (cx < 0 || cy < 0) return g_tbord[s];\n"
+"  float4 r = ld(s, cx, cy, f, m);\n"
 "  if (g_tex[s].x & 16) r.a = 1.0;\n"
 "  return r;\n"
 "}\n"
@@ -257,6 +262,14 @@ static const char s_hlsl[] =
 "  }\n"
 "  return true;\n"
 "}\n"
+"static float g_dot[4] = {0, 0, 0, 0};\n"
+"float3 dotmap(float4 v, uint m) {\n"
+"  float3 b = floor(v.rgb * 255.0 + 0.5);\n"
+"  if (m == 1) return (b - 128.0) / 127.0;\n"                      /* -1..1, D3D */
+"  if (m == 2) return (2.0 * b - 255.0) / 255.0;\n"                /* -1..1, GL */
+"  if (m == 3) return (b < 128.0 ? b : b - 256.0) / 127.0;\n"      /* -1..1, signed bytes */
+"  return v.rgb;\n"                                                   /* 0..1 (HILO: as 0..1) */
+"}\n"
 "float2 bump_signed(float2 v) {\n"   /* texels arrive offset by 128 */
 "  return (v * 255.0 - 128.0) / 127.0;\n"
 "}\n"
@@ -293,6 +306,19 @@ static const char s_hlsl[] =
 "    float2 uv = pm > 1.5 ? (c.xy + d) / q : c.xy / q + d;\n"
 "    o = rc_texel(st, 0, uv.x, uv.y);\n"
 "    if (mode == 7) o.rgb *= saturate(tin.r * g_bumpl[st].x + g_bumpl[st].y);\n"
+"    return true;\n"
+"  }\n"
+/* DOT_PRODUCT (17) and DOT_ST (9): each takes the dot of its coordinates with
+ * its source stage's colour (mapped as SET_DOT_RGBMAPPING says); DOT_ST then
+ * samples its texture at (previous stage's dot, its own). Ghoulies' steamy
+ * bathroom doorway draws the room behind through these (3 Nov): without
+ * them the doorway was black. (xemu psh.c) */
+"  if (mode == 17 || mode == 9) {\n"
+"    uint src = (uint)g_bumpl[st].z;\n"
+"    float4 tin = src == 0 ? p0 : (src == 1 ? p1 : p2);\n"
+"    g_dot[st] = dot(c.xyz, dotmap(tin, (g_dmap.x >> ((st - 1) * 4)) & 7));\n"
+"    if (mode == 17) { o = float4(0, 0, 0, 0); return true; }\n"
+"    o = rc_texel(st, 0, g_dot[st - 1], g_dot[st]);\n"
 "    return true;\n"
 "  }\n"
 "  return stage_fetch(st, c, o);\n"
@@ -821,6 +847,8 @@ typedef struct {
     float    bumpl[4][4];
     float    zc[4];
     float    zo[4];
+    float    tbord[4][4];
+    uint32_t dmap[4];
 } GpuCB;
 
 typedef HRESULT (WINAPI *PfnCompile)(LPCVOID, SIZE_T, LPCSTR,
@@ -1191,7 +1219,6 @@ int nv2a_gpu_prewarm_shaders(void)
     }
     return 1;
 }
-
 static int vsh_init(PfnCompile comp)
 {
     ID3DBlob *b = compile_src(comp, s_hlsl_vsh, sizeof s_hlsl_vsh - 1, "vs_prog", "vs_5_0");
@@ -2602,6 +2629,7 @@ static void fill_cb(GpuCB *cb, const Nv2aGpuState *st, const uint32_t tfl[4],
             cb->bump[i][0] = cb->bump[i][1] = cb->bump[i][2] = cb->bump[i][3] = 0.0f;
         cb->bumpl[i][0] = st->bump[i][4]; cb->bumpl[i][1] = st->bump[i][5];
         /* Stage 1 reads stage 0; 2 and 3 name theirs (xemu psh.c). */
+        cb->dmap[0] = st->dot_rgbmapping;
         cb->bumpl[i][2] = (float)(i == 2 ? (st->other_stage_input >> 16) & 0xF
                                 : i == 3 ? (st->other_stage_input >> 20) & 0xF : 0);
         {   /* RECOMP_BUMP_PROJ: 0 = s,t used as they are (xemu), 1 = s/q + d
@@ -2661,6 +2689,13 @@ static void fill_cb(GpuCB *cb, const Nv2aGpuState *st, const uint32_t tfl[4],
         cb->tex[i][3] = tlev[i];
         cb->tex[i][1] = d->addr_u;
         cb->tex[i][2] = d->addr_v;
+        /* Border (mode 4): outside the image the sampler returns the
+         * border colour. Read as clamp, the projected character shadows
+         * smeared their edge texels across the floor (Ghoulies, 3 Nov). */
+        cb->tbord[i][0] = (float)((d->border >> 16) & 0xFF) / 255.0f;
+        cb->tbord[i][1] = (float)((d->border >>  8) & 0xFF) / 255.0f;
+        cb->tbord[i][2] = (float)( d->border        & 0xFF) / 255.0f;
+        cb->tbord[i][3] = (float)( d->border >> 24)         / 255.0f;
         {
             /* RECOMP_GPU_FORCE_WRAP=1: a diagnostic. Every stage wraps, whatever
              * the title asked for -- if streaks vanish, address modes are the bug. */
@@ -2792,26 +2827,32 @@ static volatile LONG s_spec_ready, s_spec_used;
 
 static DWORD WINAPI spec_worker(LPVOID arg)
 {
-    static char src[sizeof s_hlsl + 2048];
+    /* One source buffer per worker: several run at once (see ps_for). */
+    char *src = (char *)malloc(sizeof s_hlsl + 2048);
     (void)arg;
+    if (!src)
+        return 0;
+    /* Background priority: the game's threads always come first. At normal
+     * priority six of these took the game to 7-10 fps while they ran. */
+    if (!SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN))
+        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_IDLE);
     for (;;) {
         PsSpec *e;
         int n, k, i;
         ID3DBlob *b;
         WaitForSingleObject(s_spec_sem, INFINITE);
-        k = s_spec_q[s_spec_qt % PS_SPEC_MAX];
-        InterlockedIncrement(&s_spec_qt);
+        k = s_spec_q[(InterlockedIncrement(&s_spec_qt) - 1) % PS_SPEC_MAX];
         e = &s_spec[k];
-        n = snprintf(src, sizeof src,
+        n = snprintf(src, sizeof s_hlsl + 2048,
                      "#define SPEC 1\n#define MODEX %uu\n#define RCX %uu\n#define RCY %uu\n"
                      "#define RCZ %uu\n#define RCW %uu\n#define RC_LOOP [unroll]\n"
                      "#define CW(s) k_cw[s]\nstatic const uint4 k_cw[8] = {\n",
                      e->key[0], e->key[1], e->key[2], e->key[3], e->key[4]);
         for (i = 0; i < 8; i++)
-            n += snprintf(src + n, sizeof src - n, "  uint4(%uu, %uu, %uu, %uu)%s\n",
+            n += snprintf(src + n, sizeof s_hlsl + 2048 - n, "  uint4(%uu, %uu, %uu, %uu)%s\n",
                           e->key[5 + i * 4], e->key[6 + i * 4], e->key[7 + i * 4],
                           e->key[8 + i * 4], i < 7 ? "," : "");
-        n += snprintf(src + n, sizeof src - n, "};\n");
+        n += snprintf(src + n, sizeof s_hlsl + 2048 - n, "};\n");
         memcpy(src + n, s_hlsl, sizeof s_hlsl - 1);
         n += (int)(sizeof s_hlsl - 1);
         b = compile_src(s_spec_comp, src, (size_t)n, "ps_main", "ps_5_0");
@@ -2840,8 +2881,23 @@ static ID3D11PixelShader *ps_for(const GpuCB *cb)
             s_spec_sem = CreateSemaphoreA(NULL, 0, PS_SPEC_MAX, NULL);
             if (!s_spec_sem)
                 s_spec_on = 0;
-            else
-                CloseHandle(CreateThread(NULL, 0, spec_worker, NULL, 0, NULL));
+            else {
+                /* Several workers: each setup takes 2-25 s to compile (one
+                 * took 5 minutes), and with one worker a new room drew with
+                 * the slow general shader for minutes (Ghoulies, 3 Nov).
+                 * RECOMP_SPEC_THREADS overrides; default a quarter of the
+                 * cores, 1..3, at background priority. */
+                SYSTEM_INFO si;
+                const char *t = getenv("RECOMP_SPEC_THREADS");
+                int nt;
+                GetSystemInfo(&si);
+                nt = t ? atoi(t) : (int)si.dwNumberOfProcessors / 4;
+                if (nt < 1) nt = 1;
+                if (nt > (t ? 8 : 3)) nt = t ? 8 : 3;
+                fprintf(stderr, "  [GPU11] %d combiner shader worker(s)\n", nt);
+                while (nt-- > 0)
+                    CloseHandle(CreateThread(NULL, 0, spec_worker, NULL, 0, NULL));
+            }
         }
     }
     if (!s_spec_on || cb->mode[0] != 2)
