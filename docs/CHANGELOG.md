@@ -5,6 +5,7 @@
 - Fixed: random crashes in some areas (the shower among them). The game's main stack ran into the scratch stack the sound and timer interrupts use; they now have their own memory.
 - Fixed: the steamy bathroom doorway was a black box. Two texture modes it uses (dot product / dot ST) are now emulated.
 - Fixed: stretched shadows smeared across the floor. Textures that use "border" edges now get their border colour.
+- Fixed: the flickering ice and spikes in the freezer room.
 - Fast shaders for each new room are built in the background on spare cores, so new rooms slow down for a shorter time.
 
 ## First playtest build
