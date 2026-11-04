@@ -1,0 +1,544 @@
+/* launcher.c -- the settings window shown before the game starts
+ * (from the Orta PC port, same look).
+ *
+ * Shown the first time the game is started (settings.ini has no
+ * [Launcher] ShowOnStart yet), every time if the player ticks "Show this
+ * every time", and whenever Shift is held while the game starts. Scripted
+ * runs (stderr captured, see recomp_diag_quiet) never see it.
+ *
+ * Plain Win32 so it is up before Direct3D: mouse, touch, keyboard, or a
+ * controller (D-pad/stick moves, left/right changes, A selects, Start plays).
+ * Values are written to settings.ini with WritePrivateProfileString, which
+ * keeps the file's comments and the [Advanced] section as they are. */
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#include <commctrl.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "launcher.h"
+
+/* A script running the game keeps stderr (the dev loop, Play Ghoulies.bat):
+ * no launcher then. Started normally, stderr goes nowhere. */
+static int recomp_diag_quiet(void)
+{
+    HANDLE eh = GetStdHandle(STD_ERROR_HANDLE);
+    return !eh || eh == INVALID_HANDLE_VALUE || GetFileType(eh) == FILE_TYPE_UNKNOWN;
+}
+
+enum {
+    ID_RES = 100, ID_MODE, ID_WINH, ID_WIDE, ID_VSYNC, ID_AA, ID_VOL, ID_VOLTXT,
+    ID_SFX, ID_SFXTXT, ID_RUMBLE,
+    ID_SHOW, ID_PLAY, ID_QUIT, ID_TIMER = 1
+};
+
+static const int k_res_h[] = { 480, 720, 1080, 1440, 2160, 0 };   /* 0: Native */
+static const char *k_res_v[] = { "480", "720", "1080", "1440", "2160", "Native" };
+static const char *k_res_n[] = { "original, fastest", "720p", "1080p", "1440p", "4K", "Native" };
+static const int k_winh[] = { 540, 720, 900, 1080, 1440 };
+
+/* The primary screen in real pixels. Asked once: the F1 menu labels ask
+ * every frame, and EnumDisplaySettings is slow. */
+void gh_screen_size(int *w, int *h)
+{
+    static int sw, sh;
+    if (!sh) {
+        DEVMODEW dm;
+        memset(&dm, 0, sizeof dm);
+        dm.dmSize = sizeof dm;
+        if (EnumDisplaySettingsW(NULL, ENUM_CURRENT_SETTINGS, &dm) && dm.dmPelsHeight) {
+            sw = (int)dm.dmPelsWidth;
+            sh = (int)dm.dmPelsHeight;
+        } else {
+            sw = GetSystemMetrics(SM_CXSCREEN);
+            sh = GetSystemMetrics(SM_CYSCREEN);
+        }
+    }
+    *w = sw;
+    *h = sh;
+}
+
+int gh_res_index(const char *v)
+{
+    int i, h, best = 0;
+    while (v && (*v == ' ' || *v == '\t')) v++;
+    if (!v || !*v) return 0;
+    if (!_strnicmp(v, "native", 6)) return 5;
+    h = atoi(v);
+    for (i = 0; i < 5; i++)
+        if (abs(k_res_h[i] - h) < abs(k_res_h[best] - h)) best = i;
+    return best;
+}
+
+const char *gh_res_value(int i)
+{
+    return k_res_v[i < 0 || i >= GH_RES_COUNT ? 0 : i];
+}
+
+int gh_res_height(int i)
+{
+    int w, h;
+    if (i < 0 || i >= GH_RES_COUNT) i = 0;
+    if (k_res_h[i]) return k_res_h[i];
+    gh_screen_size(&w, &h);
+    return h > 0 ? h : 1080;
+}
+
+int gh_res_scale(const char *v)
+{
+    int h, k;
+    while (v && (*v == ' ' || *v == '\t')) v++;
+    if (v && !_strnicmp(v, "native", 6)) h = gh_res_height(5);
+    else h = v ? atoi(v) : 480;          /* old values (960, 2400...) keep working */
+    if (h <= 0) h = 480;
+    k = (h + 479) / 480;
+    return k < 1 ? 1 : k > 6 ? 6 : k;
+}
+
+void gh_res_label(int i, int wide, char *out, int cap)
+{
+    int w, h;
+    if (i < 0 || i >= GH_RES_COUNT) i = 0;
+    if (!k_res_h[i]) {
+        gh_screen_size(&w, &h);
+        snprintf(out, cap, "Native (%d x %d)", w, h);
+        return;
+    }
+    h = k_res_h[i];
+    w = wide ? (h * 16 + 8) / 9 : h * 4 / 3;
+    snprintf(out, cap, "%d x %d (%s)", w, h, k_res_n[i]);
+}
+
+static const char *s_ini;
+static HWND s_wnd, s_res, s_mode, s_winh, s_wide, s_vsync, s_vol, s_voltxt, s_show;
+static HWND s_sfx, s_sfxtxt, s_rumble, s_aa;
+static HFONT s_font, s_title_font;
+static int s_dpi = 96, s_result, s_bottom = 500;
+static int s_screen_w, s_screen_h;
+
+static int S(int v) { return MulDiv(v, s_dpi, 96); }
+
+static int ini_int(const char *sec, const char *key, int def)
+{
+    return (int)GetPrivateProfileIntA(sec, key, def, s_ini);
+}
+
+static void ini_put(const char *sec, const char *key, int v)
+{
+    char b[16];
+    snprintf(b, sizeof b, "%d", v);
+    WritePrivateProfileStringA(sec, key, b, s_ini);
+}
+
+static int nearest(const int *list, int n, int v)
+{
+    int i, best = 0;
+    for (i = 0; i < n; i++)
+        if (abs(list[i] - v) < abs(list[best] - v)) best = i;
+    return best;
+}
+
+/* ── controls ────────────────────────────────────────────────────────── */
+static HWND mk(const wchar_t *cls, const wchar_t *text, DWORD style, int x, int y,
+               int w, int h, int id)
+{
+    HWND c = CreateWindowExW(0, cls, text, WS_CHILD | WS_VISIBLE | style,
+                             S(x), S(y), S(w), S(h), s_wnd, (HMENU)(INT_PTR)id, NULL, NULL);
+    SendMessageW(c, WM_SETFONT, (WPARAM)s_font, TRUE);
+    return c;
+}
+
+static void label(const wchar_t *text, int y)
+{
+    mk(L"STATIC", text, SS_CENTERIMAGE, 24, y, 180, 30, 0);
+}
+
+static void update_volume_text(void)
+{
+    static HWND *const bars[] = { &s_vol, &s_sfx };
+    static HWND *const txts[] = { &s_voltxt, &s_sfxtxt };
+    wchar_t b[16];
+    int i;
+    for (i = 0; i < 2; i++) {
+        if (!*bars[i]) continue;
+        swprintf(b, 16, L"%d", (int)SendMessageW(*bars[i], TBM_GETPOS, 0, 0));
+        SetWindowTextW(*txts[i], b);
+    }
+}
+
+/* A slider row: label, trackbar 0..max, and the number beside it. */
+static HWND slider(const wchar_t *text, int y, int id, int max, int pos, HWND *txt)
+{
+    HWND t;
+    label(text, y);
+    t = mk(TRACKBAR_CLASSW, L"", TBS_HORZ | TBS_NOTICKS | WS_TABSTOP, 204, y, 236, 30, id);
+    SendMessageW(t, TBM_SETRANGE, TRUE, MAKELPARAM(0, max));
+    SendMessageW(t, TBM_SETPAGESIZE, 0, 10);
+    SendMessageW(t, TBM_SETPOS, TRUE, pos);
+    *txt = mk(L"STATIC", L"", SS_CENTERIMAGE, 446, y, 40, 30, id + 1);
+    return t;
+}
+
+static void update_enabled(void)
+{
+    EnableWindow(s_winh, SendMessageW(s_mode, CB_GETCURSEL, 0, 0) == 1);
+}
+
+/* Width for a height at the chosen shape: 16:9, or the original 4:3. */
+static int width_for(int h)
+{
+    int wide = !s_wide || SendMessageW(s_wide, BM_GETCHECK, 0, 0) == BST_CHECKED;
+    return wide ? (h * 16 + 8) / 9 : h * 4 / 3;
+}
+
+/* (Re)write both size lists as full sizes, keeping what is selected. */
+static void fill_sizes(void)
+{
+    wchar_t b[96];
+    char a[96];
+    int i, sel = (int)SendMessageW(s_res, CB_GETCURSEL, 0, 0);
+    int wsel = (int)SendMessageW(s_winh, CB_GETCURSEL, 0, 0);
+    int wide = SendMessageW(s_wide, BM_GETCHECK, 0, 0) == BST_CHECKED;
+    SendMessageW(s_res, CB_RESETCONTENT, 0, 0);
+    for (i = 0; i < GH_RES_COUNT; i++) {
+        gh_res_label(i, wide, a, sizeof a);
+        MultiByteToWideChar(CP_UTF8, 0, a, -1, b, 96);
+        SendMessageW(s_res, CB_ADDSTRING, 0, (LPARAM)b);
+    }
+    SendMessageW(s_res, CB_SETCURSEL, sel, 0);
+    SendMessageW(s_winh, CB_RESETCONTENT, 0, 0);
+    for (i = 0; i < 5; i++) {
+        swprintf(b, 96, L"%d x %d", width_for(k_winh[i]), k_winh[i]);
+        SendMessageW(s_winh, CB_ADDSTRING, 0, (LPARAM)b);
+    }
+    SendMessageW(s_winh, CB_SETCURSEL, wsel, 0);
+}
+
+static void build(void)
+{
+    wchar_t b[96];
+    int i, y = 76;
+    HWND t = mk(L"STATIC", L"Grabbed by the Ghoulies", 0, 24, 16, 460, 36, 0);
+    SendMessageW(t, WM_SETFONT, (WPARAM)s_title_font, TRUE);
+    swprintf(b, 96, L"Settings before you play. Your screen is %d x %d.", s_screen_w, s_screen_h);
+    mk(L"STATIC", b, 0, 24, 50, 460, 22, 0);
+
+    label(L"Render resolution", y);
+    s_res = mk(WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_TABSTOP | WS_VSCROLL, 210, y + 2, 270, 300, ID_RES);
+    {
+        char v[32];
+        GetPrivateProfileStringA("Display", "Resolution", "480", v, sizeof v, s_ini);
+        for (i = 0; i < GH_RES_COUNT; i++) SendMessageW(s_res, CB_ADDSTRING, 0, (LPARAM)L"");
+        SendMessageW(s_res, CB_SETCURSEL, gh_res_index(v), 0);
+    }
+    y += 40;
+
+    label(L"Display", y);
+    s_mode = mk(WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_TABSTOP, 210, y + 2, 270, 200, ID_MODE);
+    SendMessageW(s_mode, CB_ADDSTRING, 0, (LPARAM)L"Fullscreen");
+    SendMessageW(s_mode, CB_ADDSTRING, 0, (LPARAM)L"Window");
+    SendMessageW(s_mode, CB_SETCURSEL, ini_int("Display", "Fullscreen", 1) ? 0 : 1, 0);
+    y += 40;
+
+    label(L"Window height", y);
+    s_winh = mk(WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_TABSTOP, 210, y + 2, 270, 200, ID_WINH);
+    for (i = 0; i < 5; i++) SendMessageW(s_winh, CB_ADDSTRING, 0, (LPARAM)L"");
+    SendMessageW(s_winh, CB_SETCURSEL, nearest(k_winh, 5, ini_int("Display", "WindowHeight", 720)), 0);
+    y += 44;
+
+    s_wide = mk(WC_BUTTONW, L"Widescreen (16:9)", BS_AUTOCHECKBOX | WS_TABSTOP, 210, y, 270, 28, ID_WIDE);
+    SendMessageW(s_wide, BM_SETCHECK, ini_int("Display", "Widescreen", 1) ? BST_CHECKED : BST_UNCHECKED, 0);
+    y += 34;
+    s_vsync = mk(WC_BUTTONW, L"VSync (no tearing, a little more lag)", BS_AUTOCHECKBOX | WS_TABSTOP,
+                 210, y, 280, 28, ID_VSYNC);
+    SendMessageW(s_vsync, BM_SETCHECK, ini_int("Display", "VSync", 0) ? BST_CHECKED : BST_UNCHECKED, 0);
+    y += 34;
+    y += 2;
+    label(L"Anti-aliasing", y);
+    s_aa = mk(WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_TABSTOP, 210, y + 2, 270, 200, ID_AA);
+    SendMessageW(s_aa, CB_ADDSTRING, 0, (LPARAM)L"Off");
+    SendMessageW(s_aa, CB_ADDSTRING, 0, (LPARAM)L"Smooth scaling");
+    SendMessageW(s_aa, CB_ADDSTRING, 0, (LPARAM)L"Smooth scaling + FXAA");
+    {
+        int v = ini_int("Display", "AntiAliasing", 2);
+        SendMessageW(s_aa, CB_SETCURSEL, v < 0 ? 0 : v > 2 ? 2 : v, 0);
+    }
+    y += 44;
+
+    s_vol = slider(L"Master volume", y, ID_VOL, 100, ini_int("Audio", "Volume", 50), &s_voltxt);
+    y += 38;
+    s_sfx = slider(L"Sound effects", y, ID_SFX, 100, ini_int("Audio", "SfxVolume", 70), &s_sfxtxt);
+    update_volume_text();
+    y += 40;
+    s_rumble = mk(WC_BUTTONW, L"Controller rumble", BS_AUTOCHECKBOX | WS_TABSTOP,
+                  210, y, 270, 28, ID_RUMBLE);
+    SendMessageW(s_rumble, BM_SETCHECK, ini_int("Controller", "Rumble", 1) ? BST_CHECKED : BST_UNCHECKED, 0);
+    mk(L"STATIC", L"Sound effects: 70 matches the original mix with the music.",
+       0, 24, y + 34, 460, 22, 0);
+    y += 68;
+
+    s_show = mk(WC_BUTTONW, L"Show this window every time the game starts",
+                BS_AUTOCHECKBOX | WS_TABSTOP, 24, y, 460, 28, ID_SHOW);
+    SendMessageW(s_show, BM_SETCHECK, ini_int("Launcher", "ShowOnStart", 0) ? BST_CHECKED : BST_UNCHECKED, 0);
+    y += 30;
+    mk(L"STATIC", L"Hold Shift while starting the game to see it again. "
+                  L"Press F1 (or Back + Start) in the game for more settings.",
+       0, 24, y, 460, 40, 0);
+    y += 50;
+
+    mk(WC_BUTTONW, L"Play", BS_DEFPUSHBUTTON | WS_TABSTOP, 264, y, 104, 36, ID_PLAY);
+    mk(WC_BUTTONW, L"Quit", WS_TABSTOP, 380, y, 104, 36, ID_QUIT);
+    s_bottom = y + 56;
+    fill_sizes();
+    update_enabled();
+}
+
+static void save(void)
+{
+    WritePrivateProfileStringA("Display", "Resolution",
+                               gh_res_value((int)SendMessageW(s_res, CB_GETCURSEL, 0, 0)), s_ini);
+    ini_put("Display", "Fullscreen", SendMessageW(s_mode, CB_GETCURSEL, 0, 0) == 0);
+    ini_put("Display", "WindowHeight", k_winh[SendMessageW(s_winh, CB_GETCURSEL, 0, 0)]);
+    ini_put("Display", "Widescreen", SendMessageW(s_wide, BM_GETCHECK, 0, 0) == BST_CHECKED);
+    ini_put("Display", "VSync", SendMessageW(s_vsync, BM_GETCHECK, 0, 0) == BST_CHECKED);
+    ini_put("Display", "AntiAliasing", (int)SendMessageW(s_aa, CB_GETCURSEL, 0, 0));
+    ini_put("Audio", "Volume", (int)SendMessageW(s_vol, TBM_GETPOS, 0, 0));
+    ini_put("Audio", "SfxVolume", (int)SendMessageW(s_sfx, TBM_GETPOS, 0, 0));
+    ini_put("Controller", "Rumble", SendMessageW(s_rumble, BM_GETCHECK, 0, 0) == BST_CHECKED);
+    ini_put("Launcher", "ShowOnStart", SendMessageW(s_show, BM_GETCHECK, 0, 0) == BST_CHECKED);
+}
+
+/* ── controller ──────────────────────────────────────────────────────── */
+typedef struct { WORD buttons; BYTE lt, rt; SHORT lx, ly, rx, ry; } PadState;
+typedef struct { DWORD packet; PadState g; } PadInput;
+typedef DWORD (WINAPI *PfnGetState)(DWORD, PadInput *);
+static PfnGetState s_get_state;
+static WORD s_prev;
+static DWORD s_repeat_at;
+
+#define PAD_UP 0x0001
+#define PAD_DOWN 0x0002
+#define PAD_LEFT 0x0004
+#define PAD_RIGHT 0x0008
+#define PAD_START 0x0010
+#define PAD_A 0x1000
+
+static void nudge(HWND c, int dir)
+{
+    wchar_t cls[32];
+    GetClassNameW(c, cls, 32);
+    if (!lstrcmpiW(cls, WC_COMBOBOXW)) {
+        int n = (int)SendMessageW(c, CB_GETCOUNT, 0, 0);
+        int i = (int)SendMessageW(c, CB_GETCURSEL, 0, 0) + dir;
+        if (i >= 0 && i < n) {
+            SendMessageW(c, CB_SETCURSEL, i, 0);
+            SendMessageW(s_wnd, WM_COMMAND, MAKEWPARAM(GetDlgCtrlID(c), CBN_SELCHANGE), (LPARAM)c);
+        }
+    } else if (!lstrcmpiW(cls, TRACKBAR_CLASSW)) {
+        int p = (int)SendMessageW(c, TBM_GETPOS, 0, 0) + dir * 5;
+        int max = (int)SendMessageW(c, TBM_GETRANGEMAX, 0, 0);
+        SendMessageW(c, TBM_SETPOS, TRUE, p < 0 ? 0 : p > max ? max : p);
+        update_volume_text();
+    } else if (!lstrcmpiW(cls, WC_BUTTONW) && (GetWindowLongW(c, GWL_STYLE) & 0xF) == BS_AUTOCHECKBOX) {
+        SendMessageW(c, BM_CLICK, 0, 0);
+    }
+}
+
+static void poll_pad(void)
+{
+    PadInput in;
+    WORD b = 0, press;
+    DWORD now = GetTickCount();
+    int i;
+    if (!s_get_state) return;
+    for (i = 0; i < 4; i++) {
+        if (s_get_state((DWORD)i, &in) == 0) {
+            b |= in.g.buttons;
+            if (in.g.ly > 16000) b |= PAD_UP;
+            if (in.g.ly < -16000) b |= PAD_DOWN;
+            if (in.g.lx < -16000) b |= PAD_LEFT;
+            if (in.g.lx > 16000) b |= PAD_RIGHT;
+        }
+    }
+    press = (WORD)(b & ~s_prev);
+    if (b & (PAD_UP | PAD_DOWN | PAD_LEFT | PAD_RIGHT)) {
+        if (press) s_repeat_at = now + 400;
+        else if ((LONG)(now - s_repeat_at) >= 0) { press |= (WORD)(b & 0xF); s_repeat_at = now + 120; }
+    }
+    s_prev = b;
+    if (!press) return;
+    if (GetForegroundWindow() != s_wnd) return;
+    SendMessageW(s_wnd, WM_CHANGEUISTATE, MAKEWPARAM(UIS_CLEAR, UISF_HIDEFOCUS), 0);
+    if (press & PAD_UP)    SendMessageW(s_wnd, WM_NEXTDLGCTL, 1, FALSE);
+    if (press & PAD_DOWN)  SendMessageW(s_wnd, WM_NEXTDLGCTL, 0, FALSE);
+    if (press & PAD_LEFT)  nudge(GetFocus(), -1);
+    if (press & PAD_RIGHT) nudge(GetFocus(), 1);
+    if (press & PAD_A) {
+        HWND f = GetFocus();
+        wchar_t cls[32];
+        GetClassNameW(f, cls, 32);
+        if (!lstrcmpiW(cls, WC_BUTTONW)) SendMessageW(f, BM_CLICK, 0, 0);
+        else if (!lstrcmpiW(cls, WC_COMBOBOXW)) nudge(f, 1);
+    }
+    if (press & PAD_START) PostMessageW(s_wnd, WM_COMMAND, ID_PLAY, 0);
+}
+
+/* ── window ──────────────────────────────────────────────────────────── */
+static LRESULT CALLBACK proc(HWND h, UINT m, WPARAM w, LPARAM l)
+{
+    switch (m) {
+    case WM_COMMAND:
+        switch (LOWORD(w)) {
+        case ID_PLAY: case IDOK: save(); s_result = 1; DestroyWindow(h); return 0;
+        case ID_QUIT: case IDCANCEL: s_result = 0; DestroyWindow(h); return 0;
+        case ID_MODE: if (HIWORD(w) == CBN_SELCHANGE) update_enabled(); return 0;
+        case ID_WIDE: if (HIWORD(w) == BN_CLICKED) fill_sizes(); return 0;
+        }
+        break;
+    case WM_HSCROLL:
+        if ((HWND)l == s_vol || (HWND)l == s_sfx) update_volume_text();
+        return 0;
+    case WM_TIMER:
+        poll_pad();
+        return 0;
+    case WM_CTLCOLORSTATIC:
+        SetBkMode((HDC)w, TRANSPARENT);
+        return (LRESULT)GetSysColorBrush(COLOR_WINDOW);
+    case WM_CLOSE:
+        s_result = 0;
+        DestroyWindow(h);
+        return 0;
+    case WM_DESTROY:
+        PostQuitMessage(0);
+        return 0;
+    }
+    return DefWindowProcW(h, m, w, l);
+}
+
+/* Common controls 6 (themed controls) without a manifest in the exe: borrow
+ * the one shell32.dll carries. */
+static HANDLE themed_controls(ULONG_PTR *cookie)
+{
+    ACTCTXW ac;
+    HANDLE ctx;
+    memset(&ac, 0, sizeof ac);
+    ac.cbSize = sizeof ac;
+    ac.dwFlags = ACTCTX_FLAG_RESOURCE_NAME_VALID;
+    ac.lpSource = L"shell32.dll";
+    ac.lpResourceName = MAKEINTRESOURCEW(124);
+    ctx = CreateActCtxW(&ac);
+    if (ctx == INVALID_HANDLE_VALUE) return NULL;
+    if (!ActivateActCtx(ctx, cookie)) { ReleaseActCtx(ctx); return NULL; }
+    return ctx;
+}
+
+int launcher_maybe_run(const char *ini_path)
+{
+    typedef void *(WINAPI *PfnSetCtx)(void *);
+    typedef UINT (WINAPI *PfnDpiWnd)(HWND);
+    HMODULE user = GetModuleHandleW(L"user32.dll"), xi;
+    PfnSetCtx set_ctx = (PfnSetCtx)(void *)GetProcAddress(user, "SetThreadDpiAwarenessContext");
+    PfnDpiWnd dpi_wnd = (PfnDpiWnd)(void *)GetProcAddress(user, "GetDpiForWindow");
+    void *old_ctx = NULL;
+    ULONG_PTR cookie = 0;
+    HANDLE actx;
+    WNDCLASSW wc;
+    RECT r;
+    MSG msg;
+    NONCLIENTMETRICSW ncm;
+    INITCOMMONCONTROLSEX icc;
+    int show, shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+    const char *force = getenv("RECOMP_LAUNCHER");
+
+    s_ini = ini_path;
+    show = ini_int("Launcher", "ShowOnStart", -1);       /* -1: never chosen = first start */
+    if (force && *force == '0') return 1;
+    if (!(force && *force == '1')) {
+        if (!recomp_diag_quiet()) return 1;               /* a script is running the game */
+        if (show == 0 && !shift) return 1;
+    }
+
+    /* Crisp on high-DPI screens, for this window only (the game's own
+     * window keeps the process's setting). */
+    if (set_ctx) old_ctx = set_ctx((void *)(INT_PTR)-4);  /* PER_MONITOR_AWARE_V2 */
+    actx = themed_controls(&cookie);
+    icc.dwSize = sizeof icc;
+    icc.dwICC = ICC_STANDARD_CLASSES | ICC_BAR_CLASSES;
+    InitCommonControlsEx(&icc);
+
+    gh_screen_size(&s_screen_w, &s_screen_h);
+    xi = LoadLibraryW(L"xinput1_4.dll");
+    if (!xi) xi = LoadLibraryW(L"xinput1_3.dll");
+    s_get_state = xi ? (PfnGetState)(void *)GetProcAddress(xi, "XInputGetState") : NULL;
+
+    memset(&wc, 0, sizeof wc);
+    wc.lpfnWndProc = proc;
+    wc.hInstance = GetModuleHandleW(NULL);
+    wc.hCursor = LoadCursorW(NULL, (LPCWSTR)IDC_ARROW);
+    wc.hIcon = LoadIconW(wc.hInstance, MAKEINTRESOURCEW(1));
+    wc.hbrBackground = GetSysColorBrush(COLOR_WINDOW);
+    wc.lpszClassName = L"GhouliesLauncher";
+    RegisterClassW(&wc);
+    s_wnd = CreateWindowExW(0, L"GhouliesLauncher", L"Grabbed by the Ghoulies",
+                            WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
+                            CW_USEDEFAULT, CW_USEDEFAULT, 100, 100, NULL, NULL, wc.hInstance, NULL);
+    if (!s_wnd) {
+        if (set_ctx) set_ctx(old_ctx);
+        return 1;
+    }
+    s_dpi = dpi_wnd ? (int)dpi_wnd(s_wnd) : 96;
+    if (s_dpi < 96) s_dpi = 96;
+
+    ncm.cbSize = sizeof ncm;
+    SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof ncm, &ncm, 0);
+    ncm.lfMessageFont.lfHeight = -S(15);
+    s_font = CreateFontIndirectW(&ncm.lfMessageFont);
+    ncm.lfMessageFont.lfHeight = -S(24);
+    ncm.lfMessageFont.lfWeight = FW_SEMIBOLD;
+    s_title_font = CreateFontIndirectW(&ncm.lfMessageFont);
+
+    build();
+    r.left = 0; r.top = 0; r.right = S(508); r.bottom = S(s_bottom);
+    AdjustWindowRectEx(&r, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX, FALSE, 0);
+    {   /* centre on the screen */
+        int w = r.right - r.left, hgt = r.bottom - r.top;
+        RECT wa;
+        SystemParametersInfoW(SPI_GETWORKAREA, 0, &wa, 0);
+        SetWindowPos(s_wnd, NULL, wa.left + (wa.right - wa.left - w) / 2,
+                     wa.top + (wa.bottom - wa.top - hgt) / 2, w, hgt, SWP_NOZORDER);
+    }
+    ShowWindow(s_wnd, SW_SHOW);
+    SetForegroundWindow(s_wnd);
+    SetFocus(GetDlgItem(s_wnd, ID_PLAY));
+    SetTimer(s_wnd, ID_TIMER, 16, NULL);
+
+    s_result = 0;
+    while (GetMessageW(&msg, NULL, 0, 0) > 0) {
+        if (!IsDialogMessageW(s_wnd, &msg)) {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+    }
+    DeleteObject(s_font);
+    DeleteObject(s_title_font);
+    UnregisterClassW(L"GhouliesLauncher", wc.hInstance);
+    if (actx) { DeactivateActCtx(0, cookie); ReleaseActCtx(actx); }
+    if (set_ctx) set_ctx(old_ctx);
+    /* Wait for the buttons to be let go, so the A or Start that pressed Play
+     * does not reach the game's first screen. */
+    if (s_get_state) {
+        int i;
+        for (i = 0; i < 50; i++) {
+            PadInput in;
+            WORD b = 0;
+            int k;
+            for (k = 0; k < 4; k++)
+                if (s_get_state((DWORD)k, &in) == 0) b |= in.g.buttons;
+            if (!b) break;
+            Sleep(20);
+        }
+    }
+    return s_result;
+}

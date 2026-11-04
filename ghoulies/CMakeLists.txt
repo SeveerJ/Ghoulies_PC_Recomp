@@ -53,6 +53,7 @@ file(GLOB RECOMP_GEN_SOURCES CONFIGURE_DEPENDS "src/recomp/gen/*.c")
 set(GAME_SOURCES
     src/main.c
     src/recomp_manual.c
+    src/launcher.c
     # Add game-specific sources here, e.g.:
     # src/asset_loader.c
     # src/custom_renderer.c
@@ -89,6 +90,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     # Lets the fault handler resolve the host RIP back to the generated
     # function's symbol, i.e. to the guest function that faulted.
     dbghelp
+    comctl32    # the launcher's sliders
 )
 
 # MSVC-specific: large address aware, increase section limit for big generated files

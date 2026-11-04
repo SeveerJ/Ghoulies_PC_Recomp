@@ -452,6 +452,9 @@ static void trim(char *s)
         *--e = 0;
 }
 
+#include "launcher.h"
+static int g_no_launcher;                 /* Setup's --prewarm run */
+
 static void apply_setting(const char *section, const char *key, const char *val)
 {
     char buf[64];
@@ -460,7 +463,13 @@ static void apply_setting(const char *section, const char *key, const char *val)
         return;
     }
     if (!_stricmp(key, "Resolution")) {
-        int lines = atoi(val), k = (lines + 479) / 480;
+        int lines = atoi(val), k;
+        if (!_strnicmp(val, "native", 6)) {        /* the launcher's "Native" */
+            int w, h;
+            gh_screen_size(&w, &h);
+            lines = h;
+        }
+        k = (lines + 479) / 480;
         if (k < 1) k = 1;
         if (k > 6) k = 6;
         snprintf(buf, sizeof buf, "%d", k);
@@ -577,6 +586,13 @@ static void load_settings(void)
     if (slash)
         slash[1] = 0;
     snprintf(path, sizeof path, "%ssettings.ini", dir);
+    {   /* write the defaults first, so the launcher has a file to edit */
+        FILE *f = fopen(path, "rb");
+        if (f) fclose(f);
+        else if ((f = fopen(path, "wb")) != NULL) { fputs(k_settings_default, f); fclose(f); }
+    }
+    if (!g_no_launcher && !launcher_maybe_run(path))
+        ExitProcess(0);                            /* Quit in the launcher */
     load_ini(path, 1);
     snprintf(path, sizeof path, "%sengine.ini", dir);
     load_ini(path, 0);
@@ -690,6 +706,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
         /* engine.ini first: its shader settings are part of each cache key.
          * Prewarmed without them, every shader missed the cache and the
          * installed game sat on "compiling ps_main" for minutes (3 Nov). */
+        g_no_launcher = 1;
         load_settings();
         nv2a_gpu_prewarm_shaders();
         return 0;

@@ -40,6 +40,7 @@ Download `GhouliesPC_Setup.exe` from the Releases page and run it.
 
 ## Settings and files
 
+- **Launcher:** shown the first time the game starts, and whenever Shift is held while it starts: resolution, display mode, widescreen, VSync, anti-aliasing, volume, sound effects and rumble.
 - **F1 menu** while playing: resolution, widescreen, anti-aliasing, frame-rate cap, VSync, volume and rumble. Everything is saved to `settings.ini` next to the game.
 - **Anti-aliasing:** Off, Smooth scaling, or Smooth scaling + FXAA (`AntiAliasing = 0/1/2` in `[Display]`).
 - **60 fps:** the game keeps real-time speed at any frame rate (`FrameRateCap = 60`, or 0 for no cap).

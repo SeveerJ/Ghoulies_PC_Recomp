@@ -192,7 +192,7 @@ def compile_all(cc_dir, gen, objdir, jobs):
     for d, names in RUNTIME_SOURCES.items():
         for n in names.split():
             jobs_list.append((clang, C_FLAGS + repro + inc, os.path.join(src, d, n + ".c")))
-    game_c = [os.path.join(GAME, "src", n) for n in ("main.c", "recomp_manual.c")]
+    game_c = [os.path.join(GAME, "src", n) for n in ("main.c", "recomp_manual.c", "launcher.c")]
     game_c += sorted(os.path.join(gen, f) for f in os.listdir(gen) if f.endswith(".c"))
     for f in game_c:
         jobs_list.append((clang, C_FLAGS + repro + inc + game_inc + ["-include", extra], f))
