@@ -422,6 +422,11 @@ static const char *k_settings_default =
 ";   Resolution is above the screen's), 2-5 = smooth scaling + FXAA: 2 fast,\r\n"
 ";   3 quality, 4 high, 5 ultra (smoothest, a little more GPU time).\r\n"
 "AntiAliasing = 2\r\n"
+"; Supersampling: draws the game above your screen's resolution and shrinks it\r\n"
+";   down, the cleanest anti-aliasing (and the heaviest on the graphics card).\r\n"
+";   0 = off, 1 = 1.5x, 2 = 2x, 3 = maximum (2880 lines). Raises Resolution\r\n"
+";   when needed; it never lowers it.\r\n"
+"Supersampling = 0\r\n"
 "\r\n"
 "[Audio]\r\n"
 "; 0 to 100.\r\n"
@@ -456,6 +461,35 @@ static void trim(char *s)
 #include "launcher.h"
 static int g_no_launcher;                 /* Setup's --prewarm run */
 
+/* Resolution and Supersampling together pick the render scale. Supersampling
+ * draws at 1.5x / 2x / the most (2880 lines) of the screen's height, and the
+ * present shader averages it down; it only ever raises Resolution. */
+static int s_res_k, s_ss;
+
+static void apply_render_scale(void)
+{
+    static const float f[4] = { 0, 1.5f, 2.0f, 6.0f };
+    char buf[16];
+    int k = s_res_k;
+    if (s_ss > 0) {
+        int w, h, kss;
+        gh_screen_size(&w, &h);
+        kss = s_ss == 3 ? 6 : (int)((h * f[s_ss] + 479.0f) / 480.0f);
+        if (kss > k) k = kss;
+        if (k > 6) k = 6;
+    }
+    if (s_res_k > 0) {
+        snprintf(buf, sizeof buf, "%d", s_res_k);
+        set_default_env("RECOMP_RES_K", buf);      /* the F1 menu's Resolution */
+    }
+    snprintf(buf, sizeof buf, "%d", s_ss);
+    set_default_env("RECOMP_SSAA", buf);
+    if (k > 0) {
+        snprintf(buf, sizeof buf, "%d", k);
+        set_default_env("RECOMP_GPU_SCALE", buf);
+    }
+}
+
 static void apply_setting(const char *section, const char *key, const char *val)
 {
     char buf[64];
@@ -473,8 +507,11 @@ static void apply_setting(const char *section, const char *key, const char *val)
         k = (lines + 479) / 480;
         if (k < 1) k = 1;
         if (k > 6) k = 6;
-        snprintf(buf, sizeof buf, "%d", k);
-        set_default_env("RECOMP_GPU_SCALE", buf);
+        s_res_k = k;                     /* set with Supersampling below */
+    } else if (!_stricmp(key, "Supersampling")) {
+        s_ss = atoi(val);
+        if (s_ss < 0) s_ss = 0;
+        if (s_ss > 3) s_ss = 3;
     } else if (!_stricmp(key, "RenderScale")) {
         set_default_env("RECOMP_GPU_SCALE", val);
     } else if (!_stricmp(key, "Widescreen")) {
@@ -595,6 +632,7 @@ static void load_settings(void)
     if (!g_no_launcher && !launcher_maybe_run(path))
         ExitProcess(0);                            /* Quit in the launcher */
     load_ini(path, 1);
+    apply_render_scale();
     snprintf(path, sizeof path, "%sengine.ini", dir);
     load_ini(path, 0);
 }

@@ -51,6 +51,7 @@ typedef struct {
     int fullscreen;
     int winh;           /* window height when not fullscreen */
     int vsync;
+    int ss;             /* supersampling: 0 off, 1 1.5x, 2 2x, 3 max */
     int aa;             /* 0 off, 1 smooth scaling, 2-5 + FXAA fast/quality/high/ultra */
     int fps_cap;
     int volume;         /* 0..100 */
@@ -78,7 +79,8 @@ static int clampi(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v;
 
 static void cfg_load(void)
 {
-    s_cfg.scale      = clampi(env_int("RECOMP_GPU_SCALE", 5), 1, 6);
+    s_cfg.scale      = clampi(env_int("RECOMP_RES_K", env_int("RECOMP_GPU_SCALE", 5)), 1, 6);
+    s_cfg.ss         = clampi(env_int("RECOMP_SSAA", 0), 0, 3);
     s_cfg.widescreen = env_int("RECOMP_WIDESCREEN", 1) != 0;
     s_cfg.fullscreen = xbox_FramebufferIsFullscreen();
     s_cfg.winh       = clampi(env_int("RECOMP_WINDOW_HEIGHT", 720), 240, 4320);
@@ -179,8 +181,14 @@ static void cfg_save(void)
         "; 1 = wait for the monitor's refresh when showing a frame (no tearing, more lag).\r\n"
         "VSync = %d\r\n"
         "; Anti-aliasing (smooths jagged edges): 0 = off, 1 = smooth scaling (best when\r\n"
-        ";   Resolution is above the screen's), 2 = smooth scaling + FXAA.\r\n"
+        ";   Resolution is above the screen's), 2-5 = smooth scaling + FXAA: 2 fast,\r\n"
+        ";   3 quality, 4 high, 5 ultra (smoothest, a little more GPU time).\r\n"
         "AntiAliasing = %d\r\n"
+        "; Supersampling: draws the game above your screen's resolution and shrinks it\r\n"
+        ";   down, the cleanest anti-aliasing (and the heaviest on the graphics card).\r\n"
+        ";   0 = off, 1 = 1.5x, 2 = 2x, 3 = maximum (2880 lines). Raises Resolution\r\n"
+        ";   when needed; it never lowers it.\r\n"
+        "Supersampling = %d\r\n"
         "\r\n"
         "[Audio]\r\n"
         "; 0 to 100.\r\n"
@@ -194,7 +202,7 @@ static void cfg_save(void)
         "; 0 to 100.\r\n"
         "RumbleStrength = %d\r\n",
         s_cfg.scale * 480, s_cfg.widescreen, s_cfg.cropx, s_cfg.cropy,
-        s_cfg.fullscreen, s_cfg.winh, s_cfg.fps_cap, s_cfg.vsync, s_cfg.aa,
+        s_cfg.fullscreen, s_cfg.winh, s_cfg.fps_cap, s_cfg.vsync, s_cfg.aa, s_cfg.ss,
         s_cfg.volume, s_cfg.sfx, s_cfg.rumble, s_cfg.rumble_str);
     if (adv)
         fprintf(f, "\r\n%s", adv);
@@ -594,6 +602,16 @@ static void page_display(void)
     help("Anti-aliasing", "Smooths jagged edges. Smooth scaling blends the extra detail "
          "when the render resolution is above your screen's (2400 on a 1080p screen "
          "looks best). FXAA also softens edges when it is not.", k_now);
+
+    row("Supersampling");
+    {
+        static const char *sss[] = { "Off", "1.5x screen", "2x screen", "Maximum (2880 lines)" };
+        ImGui::Combo("##ss", &s_cfg.ss, sss, 4);
+    }
+    help("Supersampling", "Draws the game above your screen's resolution and shrinks "
+         "it to fit: the cleanest edges, and the heaviest on the graphics card. "
+         "It raises Render resolution when needed and never lowers it. Turn it "
+         "down if the game slows.", k_next);
 
     row("Frame rate cap");
     {

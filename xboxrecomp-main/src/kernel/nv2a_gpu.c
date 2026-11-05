@@ -3685,6 +3685,11 @@ static void gpu_present(GSurf *s)
             if (aa < 0 || aa > 5) aa = 2;
         }
         s_blit_mode = (int)(g_present_aa >= 0 ? g_present_aa : aa);
+        {   /* RECOMP_SSAA: supersampled; always average it down, never one tap */
+            static int ss = -1;
+            if (ss < 0) { const char *e = getenv("RECOMP_SSAA"); ss = e && atoi(e) > 0; }
+            if (ss && s_blit_mode == 0) s_blit_mode = 1;
+        }
     }
     if (!present_overlay(&vp, s, f, g))
         blit(G.bb_rtv, &vp, s->srv, G.ps_present, 1, f, g);

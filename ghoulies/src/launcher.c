@@ -29,7 +29,7 @@ static int recomp_diag_quiet(void)
 }
 
 enum {
-    ID_RES = 100, ID_MODE, ID_WINH, ID_WIDE, ID_VSYNC, ID_AA, ID_FPS, ID_VOL, ID_VOLTXT,
+    ID_RES = 100, ID_MODE, ID_WINH, ID_WIDE, ID_VSYNC, ID_AA, ID_SS, ID_FPS, ID_VOL, ID_VOLTXT,
     ID_SFX, ID_SFXTXT, ID_RUMBLE,
     ID_SHOW, ID_PLAY, ID_QUIT, ID_TIMER = 1
 };
@@ -113,7 +113,7 @@ void gh_res_label(int i, int wide, char *out, int cap)
 
 static const char *s_ini;
 static HWND s_wnd, s_res, s_mode, s_winh, s_wide, s_vsync, s_vol, s_voltxt, s_show;
-static HWND s_sfx, s_sfxtxt, s_rumble, s_aa, s_fps;
+static HWND s_sfx, s_sfxtxt, s_rumble, s_aa, s_ss, s_fps;
 static HFONT s_font, s_title_font;
 static int s_dpi = 96, s_result, s_bottom = 500;
 static int s_screen_w, s_screen_h;
@@ -269,6 +269,17 @@ static void build(void)
         SendMessageW(s_aa, CB_SETCURSEL, v < 0 ? 0 : v > 5 ? 5 : v, 0);
     }
     y += 40;
+    label(L"Supersampling", y);
+    s_ss = mk(WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_TABSTOP, 210, y + 2, 270, 200, ID_SS);
+    SendMessageW(s_ss, CB_ADDSTRING, 0, (LPARAM)L"Off");
+    SendMessageW(s_ss, CB_ADDSTRING, 0, (LPARAM)L"1.5x screen");
+    SendMessageW(s_ss, CB_ADDSTRING, 0, (LPARAM)L"2x screen");
+    SendMessageW(s_ss, CB_ADDSTRING, 0, (LPARAM)L"Maximum (heaviest)");
+    {
+        int v = ini_int("Display", "Supersampling", 0);
+        SendMessageW(s_ss, CB_SETCURSEL, v < 0 ? 0 : v > 3 ? 3 : v, 0);
+    }
+    y += 40;
     label(L"Frame rate", y);
     s_fps = mk(WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_TABSTOP, 210, y + 2, 270, 200, ID_FPS);
     SendMessageW(s_fps, CB_ADDSTRING, 0, (LPARAM)L"60 fps (smoothest)");
@@ -316,6 +327,7 @@ static void save(void)
     ini_put("Display", "Widescreen", SendMessageW(s_wide, BM_GETCHECK, 0, 0) == BST_CHECKED);
     ini_put("Display", "VSync", SendMessageW(s_vsync, BM_GETCHECK, 0, 0) == BST_CHECKED);
     ini_put("Display", "AntiAliasing", (int)SendMessageW(s_aa, CB_GETCURSEL, 0, 0));
+    ini_put("Display", "Supersampling", (int)SendMessageW(s_ss, CB_GETCURSEL, 0, 0));
     ini_put("Display", "FrameRateCap", SendMessageW(s_fps, CB_GETCURSEL, 0, 0) == 1 ? 30 : 60);
     ini_put("Audio", "Volume", (int)SendMessageW(s_vol, TBM_GETPOS, 0, 0));
     ini_put("Audio", "SfxVolume", (int)SendMessageW(s_sfx, TBM_GETPOS, 0, 0));
