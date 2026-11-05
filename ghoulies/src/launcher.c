@@ -260,10 +260,13 @@ static void build(void)
     s_aa = mk(WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_TABSTOP, 210, y + 2, 270, 200, ID_AA);
     SendMessageW(s_aa, CB_ADDSTRING, 0, (LPARAM)L"Off");
     SendMessageW(s_aa, CB_ADDSTRING, 0, (LPARAM)L"Smooth scaling");
-    SendMessageW(s_aa, CB_ADDSTRING, 0, (LPARAM)L"Smooth scaling + FXAA");
+    SendMessageW(s_aa, CB_ADDSTRING, 0, (LPARAM)L"Smooth scaling + FXAA (fast)");
+    SendMessageW(s_aa, CB_ADDSTRING, 0, (LPARAM)L"Smooth scaling + FXAA (quality)");
+    SendMessageW(s_aa, CB_ADDSTRING, 0, (LPARAM)L"Smooth scaling + FXAA (high)");
+    SendMessageW(s_aa, CB_ADDSTRING, 0, (LPARAM)L"Smooth scaling + FXAA (ultra)");
     {
         int v = ini_int("Display", "AntiAliasing", 2);
-        SendMessageW(s_aa, CB_SETCURSEL, v < 0 ? 0 : v > 2 ? 2 : v, 0);
+        SendMessageW(s_aa, CB_SETCURSEL, v < 0 ? 0 : v > 5 ? 5 : v, 0);
     }
     y += 40;
     label(L"Frame rate", y);

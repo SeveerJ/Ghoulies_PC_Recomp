@@ -7,6 +7,7 @@
 - Fixed: stretched shadows smeared across the floor. Textures that use "border" edges now get their border colour.
 - Fixed: the flickering ice and spikes in the freezer room.
 - New: a 30 fps option (as on the original Xbox) in the launcher and the F1 menu. The game keeps the right speed at either rate.
+- New: more anti-aliasing choices: FXAA quality, high and ultra, as well as the fast FXAA. They follow edges further and smooth thin details more.
 - Fast shaders for each new room are built in the background on spare cores, so new rooms slow down for a shorter time.
 
 ## First playtest build

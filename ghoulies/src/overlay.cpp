@@ -51,7 +51,7 @@ typedef struct {
     int fullscreen;
     int winh;           /* window height when not fullscreen */
     int vsync;
-    int aa;             /* 0 off, 1 smooth scaling, 2 + FXAA */
+    int aa;             /* 0 off, 1 smooth scaling, 2-5 + FXAA fast/quality/high/ultra */
     int fps_cap;
     int volume;         /* 0..100 */
     int sfx;            /* 0..100, effects relative to music */
@@ -83,7 +83,7 @@ static void cfg_load(void)
     s_cfg.fullscreen = xbox_FramebufferIsFullscreen();
     s_cfg.winh       = clampi(env_int("RECOMP_WINDOW_HEIGHT", 720), 240, 4320);
     s_cfg.vsync      = env_int("RECOMP_VSYNC", 0) != 0;
-    s_cfg.aa         = clampi(env_int("RECOMP_AA", 2), 0, 2);
+    s_cfg.aa         = clampi(env_int("RECOMP_AA", 2), 0, 5);
     s_cfg.fps_cap    = env_int("RECOMP_FPS_CAP", 60);
     s_cfg.volume     = clampi(env_pct("RECOMP_APU_GAIN", 50), 0, 100);
     s_cfg.sfx        = clampi(env_pct("RECOMP_APU_SFX", 70), 0, 100);
@@ -586,8 +586,10 @@ static void page_display(void)
 
     row("Anti-aliasing");
     {
-        static const char *aas[] = { "Off", "Smooth scaling", "Smooth scaling + FXAA" };
-        ImGui::Combo("##aa", &s_cfg.aa, aas, 3);
+        static const char *aas[] = { "Off", "Smooth scaling", "Smooth scaling + FXAA (fast)",
+                                     "Smooth scaling + FXAA (quality)", "Smooth scaling + FXAA (high)",
+                                     "Smooth scaling + FXAA (ultra)" };
+        ImGui::Combo("##aa", &s_cfg.aa, aas, 6);
     }
     help("Anti-aliasing", "Smooths jagged edges. Smooth scaling blends the extra detail "
          "when the render resolution is above your screen's (2400 on a 1080p screen "

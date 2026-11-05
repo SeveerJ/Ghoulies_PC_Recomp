@@ -42,7 +42,7 @@ Download `GhouliesPC_Setup.exe` from the Releases page and run it.
 
 - **Launcher:** shown the first time the game starts, and whenever Shift is held while it starts: resolution, display mode, widescreen, VSync, anti-aliasing, volume, sound effects and rumble.
 - **F1 menu** while playing: resolution, widescreen, anti-aliasing, frame-rate cap, VSync, volume and rumble. Everything is saved to `settings.ini` next to the game.
-- **Anti-aliasing:** Off, Smooth scaling, or Smooth scaling + FXAA (`AntiAliasing = 0/1/2` in `[Display]`).
+- **Anti-aliasing:** Off, Smooth scaling, or Smooth scaling + FXAA in four strengths: fast, quality, high and ultra (`AntiAliasing = 0` to `5` in `[Display]`).
 - **60 fps:** the game keeps real-time speed at any frame rate (`FrameRateCap = 60`, or 0 for no cap).
 - **Alt+Enter** switches fullscreen. **F11** saves a frame capture for bug reports.
 - **Data folder** next to the game: saves (`Data\UserData`, `Data\TitleData`) and the game's cache (`Data\Cache`). If the game folder can't be written to, it goes in `%LOCALAPPDATA%\Ghoulies PC` instead. Deleting `Data\Cache` is safe.

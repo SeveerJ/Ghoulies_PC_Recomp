@@ -46,7 +46,7 @@ static const char s_hlsl_blit[] =
 "  return S.Load(int4(int2(p.xy) / g_b.y, 0, 0));\n"
 "}\n"
 /* Anti-aliasing at present (g_b.z: 0 off, 1 smooth scaling, 2 smooth
- * scaling + FXAA). Drawn larger than the window, each window pixel averages
+ * scaling + FXAA fast, 3-5 smooth scaling + FXAA quality/high/ultra). Drawn larger than the window, each window pixel averages
  * every source pixel under it (supersampling) instead of one bilinear tap,
  * which kept the stair-steps. Near 1:1 or enlarging, FXAA smooths the edges
  * instead (Lottes' FXAA, PC variant). */
@@ -69,6 +69,63 @@ static const char s_hlsl_blit[] =
 "  float lb = luma(b);\n"
 "  return (lb < lmin || lb > lmax) ? a : b;\n"
 "}\n"
+/* FXAA quality versions (the edge-walking FXAA 3.11 approach, as in Orta's
+ * "FXAA high quality"): find which way an edge runs, walk along it to find
+ * its ends, and shift the sample across the edge by how far this pixel is
+ * from the nearer end; plus a sub-pixel blend for thin details. Presets:
+ * 3 quality (Orta's: 12 steps, sub-pixel 0.75), 4 high (16 finer steps,
+ * full sub-pixel blend), 5 ultra (24 steps, catches fainter edges). */
+"static const float q_q[12] = { 1, 1, 1, 1, 1, 1.5, 2, 2, 2, 2, 4, 8 };\n"
+"static const float q_h[16] = { 1, 1, 1, 1, 1, 1, 1, 1, 1.5, 2, 2, 2, 2, 4, 8, 8 };\n"
+"static const float q_u[24] = { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1.5, 1.5, 2, 2, 2, 2, 2, 2, 4, 4, 8, 8 };\n"
+"float qstep(int pre, int i) { return pre >= 5 ? q_u[i] : pre == 4 ? q_h[i] : q_q[i]; }\n"
+"float lt(float2 uv) { return luma(tap(uv)); }\n"
+"float3 fxaaq(float2 uv, float2 px, int pre) {\n"
+"  int n = pre >= 5 ? 24 : pre == 4 ? 16 : 12;\n"
+"  float subk = pre >= 4 ? 1.0 : 0.75;\n"
+"  float tmin = pre >= 5 ? 0.0156 : 0.0312;\n"
+"  float3 cM = tap(uv);\n"
+"  float lM = luma(cM);\n"
+"  float lN = lt(uv + float2(0, -1) * px), lS = lt(uv + float2(0, 1) * px);\n"
+"  float lE = lt(uv + float2(1, 0) * px),  lW = lt(uv + float2(-1, 0) * px);\n"
+"  float lMax = max(max(lN, lS), max(max(lE, lW), lM));\n"
+"  float lMin = min(min(lN, lS), min(min(lE, lW), lM));\n"
+"  float range = lMax - lMin;\n"
+"  if (range < max(tmin, lMax * 0.063)) return cM;\n"
+"  float lNW = lt(uv + float2(-1, -1) * px), lNE = lt(uv + float2(1, -1) * px);\n"
+"  float lSW = lt(uv + float2(-1, 1) * px),  lSE = lt(uv + float2(1, 1) * px);\n"
+"  float eH = abs(-2 * lW + lNW + lSW) + 2 * abs(-2 * lM + lN + lS) + abs(-2 * lE + lNE + lSE);\n"
+"  float eV = abs(-2 * lS + lSW + lSE) + 2 * abs(-2 * lM + lW + lE) + abs(-2 * lN + lNW + lNE);\n"
+"  bool horz = eH >= eV;\n"
+"  float avg = (2 * (lN + lS + lE + lW) + (lNW + lNE + lSW + lSE)) / 12.0;\n"
+"  float sub = smoothstep(0, 1, saturate(abs(avg - lM) / range));\n"
+"  sub = sub * sub * subk;\n"
+"  float l1 = horz ? lN : lW, l2 = horz ? lS : lE;\n"
+"  float g1 = abs(l1 - lM), g2 = abs(l2 - lM);\n"
+"  float stepLen = horz ? px.y : px.x;\n"
+"  float lLocal, grad;\n"
+"  if (g1 >= g2) { stepLen = -stepLen; lLocal = 0.5 * (l1 + lM); grad = g1; }\n"
+"  else { lLocal = 0.5 * (l2 + lM); grad = g2; }\n"
+"  float2 cur = uv + (horz ? float2(0, stepLen * 0.5) : float2(stepLen * 0.5, 0));\n"
+"  float2 off = horz ? float2(px.x, 0) : float2(0, px.y);\n"
+"  float2 uv1 = cur - off, uv2 = cur + off;\n"
+"  float e1 = lt(uv1) - lLocal, e2 = lt(uv2) - lLocal;\n"
+"  float thr = grad * 0.25;\n"
+"  bool d1 = abs(e1) >= thr, d2 = abs(e2) >= thr;\n"
+"  [loop] for (int i = 0; i < n && !(d1 && d2); i++) {\n"
+"    float k = qstep(pre, i);\n"
+"    if (!d1) { uv1 -= off * k; e1 = lt(uv1) - lLocal; d1 = abs(e1) >= thr; }\n"
+"    if (!d2) { uv2 += off * k; e2 = lt(uv2) - lLocal; d2 = abs(e2) >= thr; }\n"
+"  }\n"
+"  float dist1 = horz ? uv.x - uv1.x : uv.y - uv1.y;\n"
+"  float dist2 = horz ? uv2.x - uv.x : uv2.y - uv.y;\n"
+"  bool near1 = dist1 < dist2;\n"
+"  float shift = -min(dist1, dist2) / (dist1 + dist2) + 0.5;\n"
+"  bool smaller = lM < lLocal;\n"
+"  bool ok = ((near1 ? e1 : e2) < 0.0) != smaller;\n"
+"  float fin = max(ok ? shift : 0.0, sub);\n"
+"  return tap(uv + (horz ? float2(0, fin * stepLen) : float2(fin * stepLen, 0)));\n"
+"}\n"
 "float4 ps_present(float4 p : SV_Position) : SV_Target {\n"
 "  float2 uv = (g_g.zw + (p.xy - g_f.xy) * g_f.zw * (1 - 2 * g_g.zw)) * g_g.xy;\n"
 "  uint tw, th, te;\n"
@@ -84,6 +141,7 @@ static const char s_hlsl_blit[] =
 "        s += tap(uv + ((float2(x, y) + 0.5) / float2(nx, ny) - 0.5) * fp * tx);\n"
 "    return float4(s / (float)(nx * ny), 1);\n"
 "  }\n"
+"  if (mode >= 3) return float4(fxaaq(uv, tx, mode), 1);\n"
 "  if (mode >= 2) return float4(fxaa(uv, tx), 1);\n"
 "  return float4(tap(uv), 1);\n"
 "}\n"
@@ -3551,7 +3609,7 @@ void (*g_present_overlay_hook)(void *dev, void *ctx, void *rtv, unsigned w, unsi
 int  (*g_present_pause_hook)(void);
 volatile long  g_present_vsync = -1;
 volatile float g_present_crop[2] = { -1.0f, -1.0f };
-volatile long  g_present_aa = -1;          /* 0 off, 1 smooth scaling, 2 + FXAA */
+volatile long  g_present_aa = -1;          /* 0 off, 1 smooth scaling, 2-5 + FXAA */
 
 static void gpu_present(GSurf *s)
 {
@@ -3624,7 +3682,7 @@ static void gpu_present(GSurf *s)
         if (aa < 0) {
             const char *e = getenv("RECOMP_AA");
             aa = e && *e ? atoi(e) : 2;
-            if (aa < 0 || aa > 2) aa = 2;
+            if (aa < 0 || aa > 5) aa = 2;
         }
         s_blit_mode = (int)(g_present_aa >= 0 ? g_present_aa : aa);
     }
