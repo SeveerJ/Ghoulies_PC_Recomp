@@ -174,7 +174,7 @@ static void cfg_save(void)
         "Fullscreen = %d\r\n"
         "; Window height when not fullscreen.\r\n"
         "WindowHeight = %d\r\n"
-        "; Frame rate cap (the game is made for 60). 0 = no cap.\r\n"
+        "; Frame rate cap: 60, or 30 as on the original Xbox. 0 = no cap.\r\n"
         "FrameRateCap = %d\r\n"
         "; 1 = wait for the monitor's refresh when showing a frame (no tearing, more lag).\r\n"
         "VSync = %d\r\n"
@@ -595,13 +595,14 @@ static void page_display(void)
 
     row("Frame rate cap");
     {
-        int cap = s_cfg.fps_cap == 0 ? 1 : 0;
-        static const char *caps[] = { "60 fps (recommended)", "Off" };
-        if (ImGui::Combo("##cap", &cap, caps, 2))
-            s_cfg.fps_cap = cap ? 0 : 60;
+        int cap = s_cfg.fps_cap == 0 ? 2 : s_cfg.fps_cap <= 30 ? 1 : 0;
+        static const char *caps[] = { "60 fps (recommended)", "30 fps (original console)", "Off" };
+        if (ImGui::Combo("##cap", &cap, caps, 3))
+            s_cfg.fps_cap = cap == 2 ? 0 : cap == 1 ? 30 : 60;
     }
-    help("Frame rate cap", "The game is made for 60 frames a second. Leave this at "
-         "60 unless you are testing.", k_next);
+    help("Frame rate cap", "60 is the smoothest. 30 is how the game ran on the Xbox, "
+         "and is steadier on slower PCs. The game runs at the right speed either way. "
+         "Off is for testing.", k_next);
 
     row("Crop border (sides)");
     ImGui::SliderInt("##cx", &s_cfg.cropx, 0, 20, "%d%%");

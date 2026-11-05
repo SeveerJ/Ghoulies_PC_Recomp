@@ -6,6 +6,7 @@
 - Fixed: the steamy bathroom doorway was a black box. Two texture modes it uses (dot product / dot ST) are now emulated.
 - Fixed: stretched shadows smeared across the floor. Textures that use "border" edges now get their border colour.
 - Fixed: the flickering ice and spikes in the freezer room.
+- New: a 30 fps option (as on the original Xbox) in the launcher and the F1 menu. The game keeps the right speed at either rate.
 - Fast shaders for each new room are built in the background on spare cores, so new rooms slow down for a shorter time.
 
 ## First playtest build

@@ -414,7 +414,7 @@ static const char *k_settings_default =
 "Fullscreen = 0\r\n"
 "; Window height when not fullscreen.\r\n"
 "WindowHeight = 720\r\n"
-"; Frame rate cap (the game is made for 60). 0 = no cap.\r\n"
+"; Frame rate cap: 60, or 30 as on the original Xbox. 0 = no cap.\r\n"
 "FrameRateCap = 60\r\n"
 "; 1 = wait for the monitor's refresh when showing a frame (no tearing, more lag).\r\n"
 "VSync = 0\r\n"
