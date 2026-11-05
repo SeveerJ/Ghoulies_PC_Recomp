@@ -187,6 +187,30 @@ void mcpx_apu_dsp_frame(MCPXAPUState *d,
              * pairing the guest set up -- bins 6/7 and 8/9 arrive with matched
              * counts. This is not what a real EP does; it is the cheapest
              * mixdown that stops discarding audio. */
+            if (g_apu_out_channels == 6) {
+                /* 5.1 (ported from Orta PC): each speaker bin to its own
+                 * speaker. The 3D voices' crosstalk pairs carry front (6/7)
+                 * and back (8/9) position, so the back pair goes to the rear
+                 * speakers; effect sends are a quiet wet signal all round,
+                 * as in stereo. The player's level goes on in apu_core.c. */
+                float fx_l = 0.0f, fx_r = 0.0f, o[6];
+                for (int b = 10; b < NUM_MIXBINS; ++b) {
+                    if (b & 1) fx_r += 0.1f * mixbins[b][i];
+                    else       fx_l += 0.1f * mixbins[b][i];
+                }
+                o[0] = mixbins[0][i] + 0.5f * mixbins[6][i] + fx_l;
+                o[1] = mixbins[1][i] + 0.5f * mixbins[7][i] + fx_r;
+                o[2] = mixbins[2][i];
+                o[3] = mixbins[3][i];
+                o[4] = mixbins[4][i] + 0.5f * mixbins[8][i] + 0.5f * fx_l;
+                o[5] = mixbins[5][i] + 0.5f * mixbins[9][i] + 0.5f * fx_r;
+                for (int c = 0; c < 6; c++) {
+                    float x = o[c] * 0.5f, a = fabsf(x);
+                    if (a > 0.8f) x = copysignf(0.8f + 0.2f * tanhf((a - 0.8f) / 0.2f), x);
+                    d->monitor.frame_buf6[off + i][c] = (int16_t)(x * 32767.0f);
+                }
+                continue;
+            }
             float left, right;
             if (mcpx_apu_mixdown_all() == 1) {
                 /* The speaker bins and the 3D (crosstalk) pairs, at speaker

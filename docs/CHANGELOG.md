@@ -9,6 +9,7 @@
 - New: a 30 fps option (as on the original Xbox) in the launcher and the F1 menu. The game keeps the right speed at either rate.
 - New: more anti-aliasing choices: FXAA quality, high and ultra, as well as the fast FXAA. They follow edges further and smooth thin details more.
 - New: a supersampling setting (1.5x, 2x or maximum): the game is drawn above your screen's resolution and shrunk to fit, for the cleanest edges.
+- New: 5.1 surround sound (Speakers setting), as in Orta PC.
 - Fast shaders for each new room are built in the background on spare cores, so new rooms slow down for a shorter time.
 
 ## First playtest build

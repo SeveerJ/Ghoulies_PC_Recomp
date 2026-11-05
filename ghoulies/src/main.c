@@ -433,6 +433,8 @@ static const char *k_settings_default =
 "Volume = 50\r\n"
 "; Sound effects relative to music, 0 to 100.\r\n"
 "SfxVolume = 70\r\n"
+"; Stereo, or 5.1 for surround speakers. Takes effect when the game starts.\r\n"
+"Speakers = Stereo\r\n"
 "\r\n"
 "[Controller]\r\n"
 "; 1 = the pad rumbles when the game asks it to.\r\n"
@@ -542,6 +544,11 @@ static void apply_setting(const char *section, const char *key, const char *val)
         if (v > 100) v = 100;
         snprintf(buf, sizeof buf, "%.2f", v / 100.0);
         set_default_env("RECOMP_APU_SFX", buf);
+    } else if (!_stricmp(key, "Speakers")) {
+        /* "5.1", "Surround" or "6" for six channels; anything else stereo. */
+        int six = val[0] == '5' || val[0] == '6' || val[0] == 's' || val[0] == 'S';
+        if (!_stricmp(val, "Stereo")) six = 0;
+        set_default_env("RECOMP_AUDIO_SPEAKERS", six ? "6" : "2");
     } else if (!_stricmp(key, "Rumble")) {
         set_default_env("RECOMP_RUMBLE", atoi(val) ? "1" : "0");
     } else if (!_stricmp(key, "RumbleStrength")) {

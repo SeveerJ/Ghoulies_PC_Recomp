@@ -30,7 +30,7 @@ static int recomp_diag_quiet(void)
 
 enum {
     ID_RES = 100, ID_MODE, ID_WINH, ID_WIDE, ID_VSYNC, ID_AA, ID_SS, ID_FPS, ID_VOL, ID_VOLTXT,
-    ID_SFX, ID_SFXTXT, ID_RUMBLE,
+    ID_SFX, ID_SFXTXT, ID_SPK, ID_RUMBLE,
     ID_SHOW, ID_PLAY, ID_QUIT, ID_TIMER = 1
 };
 
@@ -113,7 +113,7 @@ void gh_res_label(int i, int wide, char *out, int cap)
 
 static const char *s_ini;
 static HWND s_wnd, s_res, s_mode, s_winh, s_wide, s_vsync, s_vol, s_voltxt, s_show;
-static HWND s_sfx, s_sfxtxt, s_rumble, s_aa, s_ss, s_fps;
+static HWND s_spk, s_sfx, s_sfxtxt, s_rumble, s_aa, s_ss, s_fps;
 static HFONT s_font, s_title_font;
 static int s_dpi = 96, s_result, s_bottom = 500;
 static int s_screen_w, s_screen_h;
@@ -295,12 +295,21 @@ static void build(void)
     s_sfx = slider(L"Sound effects", y, ID_SFX, 100, ini_int("Audio", "SfxVolume", 70), &s_sfxtxt);
     update_volume_text();
     y += 40;
+    label(L"Speakers", y);
+    s_spk = mk(WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_TABSTOP, 210, y + 2, 270, 200, ID_SPK);
+    SendMessageW(s_spk, CB_ADDSTRING, 0, (LPARAM)L"Stereo (speakers or headphones)");
+    SendMessageW(s_spk, CB_ADDSTRING, 0, (LPARAM)L"5.1 surround");
+    {
+        char v[16];
+        GetPrivateProfileStringA("Audio", "Speakers", "Stereo", v, sizeof v, s_ini);
+        SendMessageW(s_spk, CB_SETCURSEL, (v[0] == '5' || v[0] == '6' ||
+                                           !_strnicmp(v, "surround", 8)) ? 1 : 0, 0);
+    }
+    y += 40;
     s_rumble = mk(WC_BUTTONW, L"Controller rumble", BS_AUTOCHECKBOX | WS_TABSTOP,
                   210, y, 270, 28, ID_RUMBLE);
     SendMessageW(s_rumble, BM_SETCHECK, ini_int("Controller", "Rumble", 1) ? BST_CHECKED : BST_UNCHECKED, 0);
-    mk(L"STATIC", L"Sound effects: 70 matches the original mix with the music.",
-       0, 24, y + 34, 460, 22, 0);
-    y += 68;
+    y += 40;
 
     s_show = mk(WC_BUTTONW, L"Show this window every time the game starts",
                 BS_AUTOCHECKBOX | WS_TABSTOP, 24, y, 460, 28, ID_SHOW);
@@ -331,6 +340,8 @@ static void save(void)
     ini_put("Display", "FrameRateCap", SendMessageW(s_fps, CB_GETCURSEL, 0, 0) == 1 ? 30 : 60);
     ini_put("Audio", "Volume", (int)SendMessageW(s_vol, TBM_GETPOS, 0, 0));
     ini_put("Audio", "SfxVolume", (int)SendMessageW(s_sfx, TBM_GETPOS, 0, 0));
+    WritePrivateProfileStringA("Audio", "Speakers",
+                               SendMessageW(s_spk, CB_GETCURSEL, 0, 0) == 1 ? "5.1" : "Stereo", s_ini);
     ini_put("Controller", "Rumble", SendMessageW(s_rumble, BM_GETCHECK, 0, 0) == BST_CHECKED);
     ini_put("Launcher", "ShowOnStart", SendMessageW(s_show, BM_GETCHECK, 0, 0) == BST_CHECKED);
 }
@@ -515,6 +526,15 @@ int launcher_maybe_run(const char *ini_path)
     }
     s_dpi = dpi_wnd ? (int)dpi_wnd(s_wnd) : 96;
     if (s_dpi < 96) s_dpi = 96;
+    {   /* a laptop at 150%: shrink a little rather than run off the screen.
+         * The layout is about 740 units tall at 96 dpi. */
+        RECT wa;
+        if (SystemParametersInfoW(SPI_GETWORKAREA, 0, &wa, 0)) {
+            int room = wa.bottom - wa.top - 60;
+            if (room > 300 && MulDiv(740, s_dpi, 96) > room)
+                s_dpi = MulDiv(room, 96, 740);
+        }
+    }
 
     ncm.cbSize = sizeof ncm;
     SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof ncm, &ncm, 0);

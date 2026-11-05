@@ -505,6 +505,7 @@ struct MCPXAPUState {
     struct {
         McpxApuDebugMonitorPoint point;
         int16_t frame_buf[256][2];
+        int16_t frame_buf6[256][6];   /* 5.1 output: FL FR C LFE BL BR */
         void *stream; /* SDL_AudioStream* - stubbed */
         int queued_bytes_low, queued_bytes_high;
     } monitor;
@@ -530,4 +531,5 @@ void mcpx_apu_dsp_ack_poll(MCPXAPUState *d);
 extern MCPXAPUState *g_state;
 extern struct McpxApuDebug g_dbg, g_dbg_cache;
 extern int g_dbg_voice_monitor;
+extern int g_apu_out_channels;          /* 2, or 6 for 5.1 (apu_core.c) */
 extern uint64_t g_dbg_muted_voices[4];

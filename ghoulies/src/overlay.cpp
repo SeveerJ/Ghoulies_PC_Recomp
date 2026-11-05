@@ -57,6 +57,7 @@ typedef struct {
     int volume;         /* 0..100 */
     int sfx;            /* 0..100, effects relative to music */
     int cropx, cropy;   /* 0..20 percent per side */
+    int speakers;       /* 0 stereo, 1 5.1 */
     int rumble;
     int rumble_str;     /* 0..100 */
 } Cfg;
@@ -89,6 +90,7 @@ static void cfg_load(void)
     s_cfg.fps_cap    = env_int("RECOMP_FPS_CAP", 60);
     s_cfg.volume     = clampi(env_pct("RECOMP_APU_GAIN", 50), 0, 100);
     s_cfg.sfx        = clampi(env_pct("RECOMP_APU_SFX", 70), 0, 100);
+    s_cfg.speakers   = env_int("RECOMP_AUDIO_SPEAKERS", 2) == 6;
     s_cfg.cropx      = clampi(env_int("RECOMP_CROP_X", 0), 0, 20);
     s_cfg.cropy      = clampi(env_int("RECOMP_CROP_Y", 0), 0, 20);
     s_cfg.rumble     = env_int("RECOMP_RUMBLE", 1) != 0;
@@ -195,6 +197,8 @@ static void cfg_save(void)
         "Volume = %d\r\n"
         "; Sound effects relative to music, 0 to 100.\r\n"
         "SfxVolume = %d\r\n"
+        "; Stereo, or 5.1 for surround speakers. Takes effect when the game starts.\r\n"
+        "Speakers = %s\r\n"
         "\r\n"
         "[Controller]\r\n"
         "; 1 = the pad rumbles when the game asks it to.\r\n"
@@ -203,7 +207,7 @@ static void cfg_save(void)
         "RumbleStrength = %d\r\n",
         s_cfg.scale * 480, s_cfg.widescreen, s_cfg.cropx, s_cfg.cropy,
         s_cfg.fullscreen, s_cfg.winh, s_cfg.fps_cap, s_cfg.vsync, s_cfg.aa, s_cfg.ss,
-        s_cfg.volume, s_cfg.sfx, s_cfg.rumble, s_cfg.rumble_str);
+        s_cfg.volume, s_cfg.sfx, s_cfg.speakers ? "5.1" : "Stereo", s_cfg.rumble, s_cfg.rumble_str);
     if (adv)
         fprintf(f, "\r\n%s", adv);
     fclose(f);
@@ -646,6 +650,17 @@ static void page_audio(void)
     ImGui::SliderInt("##sfx", &s_cfg.sfx, 0, 100, "%d");
     help("Sound effects", "Sound effects relative to the music. 70 matches the "
          "original mix closely.", k_now);
+
+    row("Speakers");
+    {
+        static const char *sp[] = { "Stereo", "5.1 surround" };
+        int i = s_cfg.speakers;
+        if (ImGui::Combo("##spk", &i, sp, 2))
+            s_cfg.speakers = i;
+    }
+    help("Speakers", "5.1 sends sound behind you to the rear speakers. With "
+         "headphones or two speakers, Windows folds it back to stereo, but "
+         "Stereo is the better choice there.", k_next);
 }
 
 static void page_controller(void)
