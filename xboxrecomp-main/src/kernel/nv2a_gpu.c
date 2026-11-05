@@ -2944,12 +2944,15 @@ static ID3D11PixelShader *ps_for(const GpuCB *cb)
                  * took 5 minutes), and with one worker a new room drew with
                  * the slow general shader for minutes (Ghoulies, 3 Nov).
                  * RECOMP_SPEC_THREADS overrides; default a quarter of the
-                 * cores, 1..3, at background priority. */
+                 * cores, 1..3 (1 up to 8 threads), at background priority. */
                 SYSTEM_INFO si;
                 const char *t = getenv("RECOMP_SPEC_THREADS");
                 int nt;
                 GetSystemInfo(&si);
-                nt = t ? atoi(t) : (int)si.dwNumberOfProcessors / 4;
+                /* A 4-core laptop (8 threads) froze for 9 s with two
+                 * workers busy (T495, 4 Nov): up to 8 threads gets one. */
+                nt = t ? atoi(t) : si.dwNumberOfProcessors <= 8 ? 1
+                                 : (int)si.dwNumberOfProcessors / 4;
                 if (nt < 1) nt = 1;
                 if (nt > (t ? 8 : 3)) nt = t ? 8 : 3;
                 fprintf(stderr, "  [GPU11] %d combiner shader worker(s)\n", nt);

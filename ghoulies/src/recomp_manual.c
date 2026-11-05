@@ -1346,3 +1346,134 @@ void sub_001A7D00(void)
     }
     g_esp += 4u + 0x1Cu;            /* ret 0x1C */
 }
+
+/* ── Guard: a corrupt contact list (0x0004D370) ──────────────────────────
+ *
+ * Walks a packed list of records (record += size table[type] until type 0)
+ * for an object's entries, called per entry from 0x0004E1E0. Twice, in long
+ * sessions, the entry array held garbage (0xCB9C0381, 0xB7E3901D -- float
+ * data where pointers belong) and the walk read outside memory: a crash in
+ * the same place both times (3 Nov). What overwrites the array is not known
+ * yet. Until it is, a list that starts or leads outside guest memory is
+ * skipped, and the first few are logged. This is the lifted code with those
+ * checks; RECOMP_LIST_GUARD=0 turns the checks off. */
+#define RECOMP_GENERATED_CODE
+#include "recomp/gen/recomp_funcs.h"   /* path from src/: MSVC has no gen include dir */
+
+static int gh_va_ok(uint32_t va)
+{
+    static int on = -1;
+    if (on < 0) {
+        const char *e = getenv("RECOMP_LIST_GUARD");
+        on = !(e && *e == '0');
+    }
+    if (!on)
+        return 1;
+    return (va >= 0x00010000u && va < 0x04000000u - 16u)
+        || (va >= 0x80000000u && va < 0x84000000u - 16u);
+}
+
+static void gh_list_bad(const char *what, uint32_t va)
+{
+    static int n;
+    if (n++ < 10) {
+        fprintf(stderr, "[GUARD] contact list: %s at %08X is outside memory -- skipped\n",
+                what, va);
+        fflush(stderr);
+    }
+}
+
+static int gh_list_ok(uint32_t node, uint32_t a1, uint32_t a2)
+{
+    (void)a1; (void)a2;
+    if (gh_va_ok(node))
+        return 1;
+    gh_list_bad("list", node);
+    return 0;
+}
+
+void sub_0004D370(void)
+{
+    uint32_t ebp = 0;
+    ebp = g_ebp;  /* frameless: caller's frame */
+    int _flags = 0; /* fallback flag var */
+    uint32_t _fa = 0, _fb = 0;
+    int32_t _fas = 0, _fbs = 0;
+    (void)_fa; (void)_fb; (void)_fas; (void)_fbs;
+    ebp = g_seh_ebp; /* fpo_leaf: inherit caller's frame */
+
+    if (!gh_list_ok(eax, MEM32(esp + 0x14), MEM32(esp + 0x18))) {
+        esp += 4; return;                 /* skip this list: ret, nothing pushed */
+    }
+
+loc_0004D370: ;
+    PUSH32(esp, ecx);
+    PUSH32(esp, esi);
+    esi = eax;
+    _fa = (uint32_t)(MEM16(esi + 0xC)) & 0xFFFFu; _fb = (uint32_t)(0) & 0xFFFFu;
+    _fas = (int32_t)(int16_t)(_fa); _fbs = (int32_t)(int16_t)(_fb); /* cmp MEM16(esi + 0xC), 0 (16-bit) */
+    if (CMP_EQ(_fa, _fb)) goto loc_0004D3D3; /* je: equal / zero */
+
+loc_0004D37B: ;
+    PUSH32(esp, ebx);
+    ebx = MEM32(esp + 0x20);
+    PUSH32(esp, ebp);
+    ebp = MEM32(esp + 0x20);
+    PUSH32(esp, edi);
+
+loc_0004D386: ;
+    eax = MEM32(esp + 0x30);
+    ecx = MEM32(esp + 0x2C);
+    PUSH32(esp, eax);
+    PUSH32(esp, ebx);
+    PUSH32(esp, ebp);
+    edi = esp + 0x1C;
+    PUSH32(esp, 0x0004D39Au); RECOMP_ABI_CALL(0x0004C6C0u, sub_0004C6C0); /* call 0x0004C6C0 */
+
+loc_0004D39A: ;
+    _fb = (uint32_t)(0xC) & 0xFFFFFFFFu; _fbs = (int32_t)(int32_t)(_fb); /* add source, before the write */
+    esp = esp + 0xC;
+    _fa = (uint32_t)(esp) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* add result */
+    _fa = (uint32_t)(eax) & 0xFFFFFFFFu; _fb = (uint32_t)(0) & 0xFFFFFFFFu;
+    _fas = (int32_t)(int32_t)(_fa); _fbs = (int32_t)(int32_t)(_fb); /* cmp eax, 0 (32-bit) */
+    if (CMP_EQ(_fa, _fb)) goto loc_0004D3BE; /* je: equal / zero */
+
+loc_0004D3A1: ;
+    ecx = MEM32(esp + 0x10);
+    edx = MEM32(esp + 0x20);
+    eax = MEM32(esp + 0x1C);
+    PUSH32(esp, ecx);
+    ecx = MEM32(esp + 0x1C);
+    PUSH32(esp, edx);
+    PUSH32(esp, esi);
+    PUSH32(esp, eax);
+    PUSH32(esp, ecx);
+    PUSH32(esp, 0x0004D3BBu); RECOMP_ABI_CALL(0x0004C850u, sub_0004C850); /* call 0x0004C850 */
+
+loc_0004D3BB: ;
+    _fb = (uint32_t)(0x14) & 0xFFFFFFFFu; _fbs = (int32_t)(int32_t)(_fb); /* add source, before the write */
+    esp = esp + 0x14;
+    _fa = (uint32_t)(esp) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* add result */
+
+loc_0004D3BE: ;
+    edx = ZX16(MEM16(esi + 0xC));
+    _fb = (uint32_t)(MEM32(edx * 4 + 0x423630)) & 0xFFFFFFFFu; _fbs = (int32_t)(int32_t)(_fb); /* add source, before the write */
+    esi = esi + MEM32(edx * 4 + 0x423630);
+    _fa = (uint32_t)(esi) & 0xFFFFFFFFu; _fas = (int32_t)(int32_t)(_fa); /* add result */
+    if (!gh_va_ok(esi)) { gh_list_bad("next record", esi); goto loc_0004D3D0; }
+    _fa = (uint32_t)(MEM16(esi + 0xC)) & 0xFFFFu; _fb = (uint32_t)(0) & 0xFFFFu;
+    _fas = (int32_t)(int16_t)(_fa); _fbs = (int32_t)(int16_t)(_fb); /* cmp MEM16(esi + 0xC), 0 (16-bit) */
+    if (CMP_NE(_fa, _fb)) goto loc_0004D386; /* jne: not equal / not zero */
+
+loc_0004D3D0: ;
+    POP32(esp, edi);
+    POP32(esp, ebp);
+    POP32(esp, ebx);
+
+loc_0004D3D3: ;
+    POP32(esp, esi);
+    POP32(esp, ecx);
+    esp += 4; return; /* ret */
+
+}
+

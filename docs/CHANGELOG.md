@@ -10,6 +10,9 @@
 - New: more anti-aliasing choices: FXAA quality, high and ultra, as well as the fast FXAA. They follow edges further and smooth thin details more.
 - New: a supersampling setting (1.5x, 2x or maximum): the game is drawn above your screen's resolution and shrunk to fit, for the cleanest edges.
 - New: 5.1 surround sound (Speakers setting), as in Orta PC.
+- Fixed: a rare crash after long sessions (a damaged contact list is now skipped instead of read).
+- PCs with 4 cores or fewer use one background shader worker, which avoids long freezes on laptops.
+- The launcher shrinks a little to fit smaller or high-DPI screens.
 - Fast shaders for each new room are built in the background on spare cores, so new rooms slow down for a shorter time.
 
 ## First playtest build
