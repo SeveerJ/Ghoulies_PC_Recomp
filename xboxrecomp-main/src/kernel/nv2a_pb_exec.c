@@ -581,8 +581,103 @@ static int fetch_attr(const VertexAttr *a, uint32_t index, float out[4])
 
 static uint32_t surface_bpp(void);
 
+/* ── Which surface a flip shows ────────────────────────────────────────
+ * A flip shows the surface the frame drew last (drawn_offset), which is the
+ * back buffer nearly always. When a dialogue ends (Ghoulies, 6 Nov) one frame
+ * drew the dialogue panel's own off-screen picture last, and that frame showed
+ * the panel full screen with its bat corners at the screen's corners. So the
+ * flips count which surfaces they show: one shown in 60 or more flips is a
+ * display buffer. If the last-drawn surface is not one, but a display buffer
+ * was drawn this frame too, the display buffer is shown instead.
+ * RECOMP_FLIP_DISPLAY=0 turns the swap off; the [FLIPSURF] lines stay. */
+#define FS_MAX 8
+static struct { uint32_t off, pitch; unsigned n; } s_fs_seen[FS_MAX];   /* shown, with counts */
+static struct { uint32_t off, pitch; } s_fs_frame[FS_MAX];              /* drawn this frame */
+static int s_fs_nframe;
+
+static void fs_note_frame(void)
+{
+    int i;
+    for (i = 0; i < s_fs_nframe; i++)
+        if (s_fs_frame[i].off == s_gpu.color_offset)
+            return;
+    if (s_fs_nframe < FS_MAX) {
+        s_fs_frame[s_fs_nframe].off = s_gpu.color_offset;
+        s_fs_frame[s_fs_nframe].pitch = s_gpu.pitch;
+        s_fs_nframe++;
+    }
+}
+
+static unsigned fs_count(uint32_t off)
+{
+    int i;
+    for (i = 0; i < FS_MAX; i++)
+        if (s_fs_seen[i].n && s_fs_seen[i].off == off)
+            return s_fs_seen[i].n;
+    return 0;
+}
+
+static void fs_shown(uint32_t off, uint32_t pitch)
+{
+    int i, lo = 0;
+    for (i = 0; i < FS_MAX; i++)
+        if (s_fs_seen[i].n && s_fs_seen[i].off == off) {
+            s_fs_seen[i].n++;
+            s_fs_seen[i].pitch = pitch;
+            return;
+        }
+    for (i = 1; i < FS_MAX; i++)                    /* replace the least shown */
+        if (s_fs_seen[i].n < s_fs_seen[lo].n)
+            lo = i;
+    s_fs_seen[lo].off = off;
+    s_fs_seen[lo].pitch = pitch;
+    s_fs_seen[lo].n = 1;
+}
+
+/* The surface this flip should show, given the one drawn last. */
+static uint32_t fs_choose(uint32_t done, uint32_t *pitch)
+{
+    static int on = -1;
+    static unsigned logged;
+    uint32_t best = 0, bpitch = 0;
+    unsigned bn = 0;
+    int i;
+    if (on < 0) {
+        const char *e = getenv("RECOMP_FLIP_DISPLAY");
+        on = !(e && *e == '0');
+    }
+    if (!done || fs_count(done) >= 60)
+        return done;
+    for (i = 0; i < s_fs_nframe; i++) {
+        unsigned n = fs_count(s_fs_frame[i].off);
+        if (n >= 60 && n > bn) {
+            bn = n; best = s_fs_frame[i].off; bpitch = s_fs_frame[i].pitch;
+        }
+    }
+    if (s_gpu.flips > 600 && logged < 60) {
+        logged++;
+        fprintf(stderr, "[FLIPSURF] flip %u: last drawn %08X (shown %u times before); %s",
+                s_gpu.flips, done, fs_count(done),
+                best ? (on ? "showing display buffer" : "display buffer (not swapped)")
+                     : "no display buffer drawn this frame");
+        if (best)
+            fprintf(stderr, " %08X (shown %u times)", best, bn);
+        fprintf(stderr, ". Drawn this frame:");
+        for (i = 0; i < s_fs_nframe; i++)
+            fprintf(stderr, " %08X", s_fs_frame[i].off);
+        fprintf(stderr, "%c", 10);
+        fflush(stderr);
+    }
+    if (best && on) {
+        *pitch = bpitch;
+        return best;
+    }
+    return done;
+}
+
 static void note_drawn(void)
 {
+    fs_note_frame();
     if (!s_gpu.drawn_stale && s_gpu.drawn_offset
         && s_gpu.clip_w * s_gpu.clip_h < s_gpu.drawn_w * s_gpu.drawn_h)
         return;
@@ -5329,11 +5424,15 @@ void nv2a_pb_exec_method(uint32_t subch, uint32_t method, uint32_t param)
         frame_trace_flip();
         return;
 
-    case NV097_FLIP_STALL:
+    case NV097_FLIP_STALL: {
+        uint32_t show_pitch = s_gpu.drawn_offset ? s_gpu.drawn_pitch : s_gpu.pitch;
+        uint32_t show = fs_choose(s_gpu.drawn_offset ? s_gpu.drawn_offset
+                                                     : s_gpu.color_offset, &show_pitch);
         fps_cap_wait();
         /* The finished frame from the GPU into guest memory, for the window. */
-        nv2a_gpu_flip(dma_resolve(s_gpu.drawn_offset ? s_gpu.drawn_offset
-                                                     : s_gpu.color_offset));
+        nv2a_gpu_flip(dma_resolve(show));
+        if (show)
+            fs_shown(show, show_pitch);
         if (s_ftrace == 2)
             fprintf(stderr, "[FTRACE] FLIP_STALL presenting %08X (color now %08X)%c",
                     s_gpu.drawn_offset, s_gpu.color_offset, 10);
@@ -5359,10 +5458,8 @@ void nv2a_pb_exec_method(uint32_t subch, uint32_t method, uint32_t param)
         }
         if (s_gpu.pitch) {
             extern void xbox_FramebufferWindowPresent(uint32_t, uint32_t);
-            uint32_t done = s_gpu.drawn_offset ? s_gpu.drawn_offset
-                                               : s_gpu.color_offset;
-            uint32_t pitch = s_gpu.drawn_offset ? s_gpu.drawn_pitch
-                                                : s_gpu.pitch;
+            uint32_t done = show;
+            uint32_t pitch = show_pitch;
             if (done) {
                 xbox_FramebufferWindowSet(dma_resolve(done), pitch);
                 xbox_FramebufferWindowPresent(dma_resolve(done), pitch);
@@ -5390,6 +5487,7 @@ void nv2a_pb_exec_method(uint32_t subch, uint32_t method, uint32_t param)
             }
         }
         s_gpu.drawn_stale = 1;
+        s_fs_nframe = 0;
 
         if (getenv("RECOMP_PB_EXEC_VERBOSE")) {
             static unsigned n;
@@ -5400,6 +5498,7 @@ void nv2a_pb_exec_method(uint32_t subch, uint32_t method, uint32_t param)
             }
         }
         return;
+    }
 
 
     /* Vertex programs and their constants: forwarded as they arrive. */

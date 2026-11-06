@@ -45,7 +45,8 @@ Download `GhouliesPC_Setup.exe` from the Releases page and run it.
 - **Anti-aliasing:** Off, Smooth scaling, or Smooth scaling + FXAA in four strengths: fast, quality, high and ultra (`AntiAliasing = 0` to `5` in `[Display]`).
 - **Supersampling:** draws the game at 1.5x, 2x or the most (2880 lines) of your screen's height and shrinks it to fit, for the cleanest edges (`Supersampling = 0` to `3`). It is the heaviest on the graphics card.
 - **Surround:** `Speakers = 5.1` in `[Audio]` (or the launcher / F1 menu) gives 5.1 sound, with sounds behind you on the rear speakers. Takes effect when the game starts.
-- **60 fps:** the game keeps real-time speed at any frame rate (`FrameRateCap = 60`, or 0 for no cap).
+- **Defaults:** the lightest settings, so the game runs well on most PCs: 480 lines (the original resolution), 4:3, 30 fps, no anti-aliasing, stereo. Raise them in the launcher or the F1 menu.
+- **Frame rate:** 30 fps (as on the Xbox) or 60 fps; the game keeps real-time speed either way (`FrameRateCap = 30`, `60`, or 0 for no cap).
 - **Alt+Enter** switches fullscreen. **F11** saves a frame capture for bug reports.
 - **Data folder** next to the game: saves (`Data\UserData`, `Data\TitleData`) and the game's cache (`Data\Cache`). If the game folder can't be written to, it goes in `%LOCALAPPDATA%\Ghoulies PC` instead. Deleting `Data\Cache` is safe.
 - **Shaders:** compiled graphics shaders are kept in `shadercache` next to the game. Setup prepares them, so the first start is quick. Deleting the folder is safe; the next start rebuilds it.

@@ -1,6 +1,9 @@
 # Changelog
 
-## Playtest build 2 (3 Nov)
+## v0.3 beta (6 Nov)
+
+- Default settings are now the lightest: original 480-line resolution, 4:3, 30 fps (as on the Xbox), no anti-aliasing. Raise them in the launcher (hold Shift while the game starts) or the F1 menu.
+- Fixed: when a dialogue ends, one frame showed the dialogue panel full screen, with the bat corners jumping to the screen corners.
 
 - Fixed: random crashes in some areas (the shower among them). The game's main stack ran into the scratch stack the sound and timer interrupts use; they now have their own memory.
 - Fixed: the steamy bathroom doorway was a black box. Two texture modes it uses (dot product / dot ST) are now emulated.

@@ -249,7 +249,7 @@ static void build(void)
     y += 44;
 
     s_wide = mk(WC_BUTTONW, L"Widescreen (16:9)", BS_AUTOCHECKBOX | WS_TABSTOP, 210, y, 270, 28, ID_WIDE);
-    SendMessageW(s_wide, BM_SETCHECK, ini_int("Display", "Widescreen", 1) ? BST_CHECKED : BST_UNCHECKED, 0);
+    SendMessageW(s_wide, BM_SETCHECK, ini_int("Display", "Widescreen", 0) ? BST_CHECKED : BST_UNCHECKED, 0);
     y += 34;
     s_vsync = mk(WC_BUTTONW, L"VSync (no tearing, a little more lag)", BS_AUTOCHECKBOX | WS_TABSTOP,
                  210, y, 280, 28, ID_VSYNC);
@@ -265,7 +265,7 @@ static void build(void)
     SendMessageW(s_aa, CB_ADDSTRING, 0, (LPARAM)L"Smooth scaling + FXAA (high)");
     SendMessageW(s_aa, CB_ADDSTRING, 0, (LPARAM)L"Smooth scaling + FXAA (ultra)");
     {
-        int v = ini_int("Display", "AntiAliasing", 2);
+        int v = ini_int("Display", "AntiAliasing", 0);
         SendMessageW(s_aa, CB_SETCURSEL, v < 0 ? 0 : v > 5 ? 5 : v, 0);
     }
     y += 40;
@@ -285,7 +285,7 @@ static void build(void)
     SendMessageW(s_fps, CB_ADDSTRING, 0, (LPARAM)L"60 fps (smoothest)");
     SendMessageW(s_fps, CB_ADDSTRING, 0, (LPARAM)L"30 fps (original console)");
     {
-        int v = ini_int("Display", "FrameRateCap", 60);
+        int v = ini_int("Display", "FrameRateCap", 30);
         SendMessageW(s_fps, CB_SETCURSEL, (v > 0 && v <= 30) ? 1 : 0, 0);
     }
     y += 44;

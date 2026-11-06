@@ -80,14 +80,14 @@ static int clampi(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v;
 
 static void cfg_load(void)
 {
-    s_cfg.scale      = clampi(env_int("RECOMP_RES_K", env_int("RECOMP_GPU_SCALE", 5)), 1, 6);
+    s_cfg.scale      = clampi(env_int("RECOMP_RES_K", env_int("RECOMP_GPU_SCALE", 1)), 1, 6);
     s_cfg.ss         = clampi(env_int("RECOMP_SSAA", 0), 0, 3);
-    s_cfg.widescreen = env_int("RECOMP_WIDESCREEN", 1) != 0;
+    s_cfg.widescreen = env_int("RECOMP_WIDESCREEN", 0) != 0;
     s_cfg.fullscreen = xbox_FramebufferIsFullscreen();
     s_cfg.winh       = clampi(env_int("RECOMP_WINDOW_HEIGHT", 720), 240, 4320);
     s_cfg.vsync      = env_int("RECOMP_VSYNC", 0) != 0;
-    s_cfg.aa         = clampi(env_int("RECOMP_AA", 2), 0, 5);
-    s_cfg.fps_cap    = env_int("RECOMP_FPS_CAP", 60);
+    s_cfg.aa         = clampi(env_int("RECOMP_AA", 0), 0, 5);
+    s_cfg.fps_cap    = env_int("RECOMP_FPS_CAP", 30);
     s_cfg.volume     = clampi(env_pct("RECOMP_APU_GAIN", 50), 0, 100);
     s_cfg.sfx        = clampi(env_pct("RECOMP_APU_SFX", 70), 0, 100);
     s_cfg.speakers   = env_int("RECOMP_AUDIO_SPEAKERS", 2) == 6;
@@ -620,7 +620,7 @@ static void page_display(void)
     row("Frame rate cap");
     {
         int cap = s_cfg.fps_cap == 0 ? 2 : s_cfg.fps_cap <= 30 ? 1 : 0;
-        static const char *caps[] = { "60 fps (recommended)", "30 fps (original console)", "Off" };
+        static const char *caps[] = { "60 fps", "30 fps (original console)", "Off" };
         if (ImGui::Combo("##cap", &cap, caps, 3))
             s_cfg.fps_cap = cap == 2 ? 0 : cap == 1 ? 30 : 60;
     }
